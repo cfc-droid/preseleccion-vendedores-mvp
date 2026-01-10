@@ -1,15 +1,18 @@
 // ======================================================
 // PRESELECCIÓN VENDEDORES — MVP
-// Paso 15 + 16 + 17 + FASE A2
+// PASO 15 + 16 + 17 + FASE A2
 // - Lee XLSX exportado desde Google Sheets
 // - Valida estructura fija de columnas (LOCKED)
 // - Mapea semánticamente cada fila
 // - Ejecuta GATES DUROS (DESCARTADO_AUTO)
-// NO calcula score todavía
+// - Ejecuta Gate de palabras prohibidas (GBAN)
+// NO calcula score todavía (FASE B después)
 // ======================================================
 
 
-// ===== CONFIGURACIÓN FORMULARIO (LOCKED) =====
+// ======================================================
+// CONFIGURACIÓN FORMULARIO (LOCKED)
+// ======================================================
 
 const EXPECTED_HEADERS = [
   "Marca temporal",
@@ -50,25 +53,12 @@ const EXPECTED_HEADERS = [
 ];
 
 
-// ===== CLASIFICACIÓN SEMÁNTICA (POR BLOQUES) =====
-
-const COLUMN_SECTIONS = {
-  system: [0, 1],
-  filtros: [2, 3, 4, 5, 6, 7],
-  identidad: [8, 9, 10, 11],
-  experiencia: [12, 13, 14, 15],
-  canales: [16, 17, 18, 19],
-  etica_gate: [20],
-  comprension: [21, 22, 23],
-  etica: [24, 25, 26],
-  prueba: [27, 28, 29, 30],
-  cierre: [31, 32, 33]
-};
-
-
-// ===== CARGA DE REGLAS =====
+// ======================================================
+// CARGA DE REGLAS
+// ======================================================
 
 let RULES = null;
+let BANNED_WORDS = null;
 
 async function loadRules() {
   if (RULES) return RULES;
@@ -77,8 +67,17 @@ async function loadRules() {
   return RULES;
 }
 
+async function loadBannedWords(path) {
+  if (BANNED_WORDS) return BANNED_WORDS;
+  const res = await fetch(`/rules/${path}`);
+  BANNED_WORDS = await res.json();
+  return BANNED_WORDS;
+}
 
-// ===== HELPERS =====
+
+// ======================================================
+// HELPERS
+// ======================================================
 
 function normalizeText(text) {
   return String(text || "")
@@ -95,8 +94,17 @@ function countValidLines(text, minChars) {
     .filter(l => l.length >= minChars).length;
 }
 
+function containsBannedWord(text, bannedWords) {
+  const norm = normalizeText(text);
+  return bannedWords.find(word =>
+    norm.includes(normalizeText(word))
+  );
+}
 
-// ===== EJECUCIÓN DE GATES =====
+
+// ======================================================
+// EJECUCIÓN DE GATES DUROS
+// ======================================================
 
 function applyGates(row, rules) {
   for (const gate of rules.gates) {
@@ -129,17 +137,34 @@ function applyGates(row, rules) {
     }
   }
 
-  return null; // pasó todos los gates
+  return null;
+}
+
+function applyBannedWordsGate(row, rules, bannedWords) {
+  if (!rules.banned_words_gate?.enabled) return null;
+
+  for (const value of Object.values(row._raw)) {
+    const found = containsBannedWord(value, bannedWords);
+    if (found) {
+      return rules.banned_words_gate.reason;
+    }
+  }
+
+  return null;
 }
 
 
-// ===== ELEMENTOS DOM =====
+// ======================================================
+// DOM
+// ======================================================
 
 const fileInput = document.getElementById("fileInput");
 const output = document.getElementById("output");
 
 
-// ===== EVENTO PRINCIPAL =====
+// ======================================================
+// EVENTO PRINCIPAL
+// ======================================================
 
 fileInput.addEventListener("change", async () => {
   const file = fileInput.files[0];
@@ -153,7 +178,6 @@ fileInput.addEventListener("change", async () => {
 
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
-
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -165,9 +189,7 @@ fileInput.addEventListener("change", async () => {
   const headers = rows[0];
   const dataRows = rows.slice(1);
 
-
-  // ===== VALIDACIÓN DE HEADERS =====
-
+  // VALIDAR HEADERS
   const missingHeaders = EXPECTED_HEADERS.filter(h => !headers.includes(h));
   const extraHeaders = headers.filter(h => !EXPECTED_HEADERS.includes(h));
 
@@ -180,61 +202,45 @@ fileInput.addEventListener("change", async () => {
   }
 
   if (missingHeaders.length > 0) {
-    console.warn(
-      "ATENCIÓN: Faltan columnas (posible reducción futura):",
-      missingHeaders
-    );
+    console.warn("ATENCIÓN: Faltan columnas:", missingHeaders);
   }
 
-
-  // ===== MAPEO SEMÁNTICO =====
-
-  const mappedRows = dataRows.map((row, rowIndex) => {
-    const entry = {
-      _row_excel: rowIndex + 2,
-      _raw: {},
-      sections: {
-        system: {},
-        filtros: {},
-        identidad: {},
-        experiencia: {},
-        canales: {},
-        etica_gate: {},
-        comprension: {},
-        etica: {},
-        prueba: {},
-        cierre: {}
-      }
-    };
-
-    headers.forEach((header, colIndex) => {
-      const value = row[colIndex] ?? "";
-      entry._raw[header] = value;
-
-      Object.entries(COLUMN_SECTIONS).forEach(([section, indices]) => {
-        if (indices.includes(colIndex)) {
-          entry.sections[section][header] = value;
-        }
-      });
+  // MAPEO SIMPLE
+  const mappedRows = dataRows.map((row, i) => {
+    const raw = {};
+    headers.forEach((h, idx) => {
+      raw[h] = row[idx] ?? "";
     });
-
-    return entry;
+    return {
+      _row_excel: i + 2,
+      _raw: raw
+    };
   });
 
-
-  // ===== FASE A2 — APLICAR GATES =====
-
   const rules = await loadRules();
+  const bannedWords = await loadBannedWords(
+    rules.banned_words_gate.words_source
+  );
 
-  const evaluatedRows = mappedRows.map(row => {
+  // APLICAR GATES
+  const evaluated = mappedRows.map(row => {
     const gateReason = applyGates(row, rules);
-
     if (gateReason) {
       return {
         ...row,
         estado: rules.states.discarded,
         score: 0,
         motivo: gateReason
+      };
+    }
+
+    const bannedReason = applyBannedWordsGate(row, rules, bannedWords);
+    if (bannedReason) {
+      return {
+        ...row,
+        estado: rules.states.discarded,
+        score: 0,
+        motivo: bannedReason
       };
     }
 
@@ -246,24 +252,16 @@ fileInput.addEventListener("change", async () => {
     };
   });
 
-
-  // ===== RESUMEN =====
-
-  const descartados = evaluatedRows.filter(
+  const descartados = evaluated.filter(
     r => r.estado === rules.states.discarded
   ).length;
 
-  const pasan = evaluatedRows.length - descartados;
-
-  console.log("Resultado completo:", evaluatedRows);
-
-
-  // ===== SALIDA VISUAL =====
-
   output.innerHTML = `
     <p><strong>Archivo procesado</strong></p>
-    <p>Total filas: ${evaluatedRows.length}</p>
+    <p>Total filas: ${evaluated.length}</p>
     <p>Descartados por gates: ${descartados}</p>
-    <p>Pasan a scoring: ${pasan}</p>
+    <p>Pasan a scoring: ${evaluated.length - descartados}</p>
   `;
+
+  console.log("Resultado completo:", evaluated);
 });
