@@ -1,19 +1,20 @@
 {
   "meta": {
-    "version": "v1.0.0",
-    "input_columns_required": 35
-  },
-
-  "thresholds": {
-    "discard_max": 69,
-    "review_min": 70,
-    "approve_min": 85
+    "version": "v1.0.1",
+    "input_columns_required": 35,
+    "description": "Reglas oficiales de gates y scoring. Paso 18: solo gates duros."
   },
 
   "states": {
     "discarded": "DESCARTADO_AUTO",
     "review": "REVISAR",
     "approved": "APTO"
+  },
+
+  "thresholds": {
+    "discard_max": 69,
+    "review_min": 70,
+    "approve_min": 85
   },
 
   "weights": {
@@ -28,50 +29,50 @@
   "gates": [
     {
       "id": "G2",
-      "column": "2/33",
+      "header": "2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?",
       "type": "equals",
       "value": "No",
-      "reason": "No acepta comisión"
+      "reason": "Gate G2: No acepta comisión"
     },
     {
       "id": "G3",
-      "column": "3/33",
+      "header": "3/33. ¿Buscás empleo o sueldo?",
       "type": "equals",
       "value": "Sí",
-      "reason": "Busca empleo"
+      "reason": "Gate G3: Busca empleo"
     },
     {
       "id": "G6",
-      "column": "6/33",
+      "header": "6/33. ¿Leíste completo el anuncio y la advertencia?",
       "type": "equals",
       "value": "No",
-      "reason": "No leyó advertencia"
+      "reason": "Gate G6: No leyó advertencia"
     },
     {
       "id": "G7",
-      "column": "7/33",
+      "header": "7/33. Hotmart",
       "type": "equals",
       "value": "No, y no quiero usar Hotmart",
-      "reason": "Rechaza Hotmart"
+      "reason": "Gate G7: Rechaza Hotmart"
     },
     {
       "id": "G18",
-      "column": "18/33",
+      "header": "18/33. Listá 3 lugares concretos donde podrías difundir",
       "type": "min_lines",
       "min_lines": 3,
       "min_chars_per_line": 8,
-      "reason": "Menos de 3 lugares reales"
+      "reason": "Gate G18: Menos de 3 lugares reales"
     },
     {
       "id": "G20",
-      "column": "20/33",
+      "header": "20/33. ¿Cuál de estas prácticas NO harías nunca?",
       "type": "equals",
       "value": "Ninguna (no tengo límites)",
-      "reason": "Sin límites éticos"
+      "reason": "Gate G20: Sin límites éticos"
     },
     {
       "id": "G24",
-      "column": "24/33",
+      "header": "24/33. Aceptación de reglas",
       "type": "contains_all",
       "value": [
         "No promesas",
@@ -80,7 +81,14 @@
         "Producto educativo",
         "No manipulación"
       ],
-      "reason": "No acepta todas las reglas"
+      "reason": "Gate G24: No acepta todas las reglas éticas"
     }
-  ]
+  ],
+
+  "banned_words_gate": {
+    "enabled": true,
+    "scope": "all_text_fields",
+    "words_source": "banned_words.json",
+    "reason": "Gate GBAN: Lenguaje prohibido"
+  }
 }
