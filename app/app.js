@@ -116,12 +116,15 @@ function isGeneric(text) {
   return hits >= 2;
 }
 
+function safeStr(v) {
+  return String(v ?? "");
+}
+
 
 // ======================================================
-// MAPEO DE HEADERS (CLAVE DE LA SOLUCIÓN)
+// MAPEO DE HEADERS (CLAVE)
 // - Base: "Marca temporal", "Dirección de correo electrónico" por canon()
 // - Preguntas: se matchean por NÚMERO "1/33", "2/33", etc.
-// Así el mismo XLSX de Google Forms SIEMPRE va a entrar.
 // ======================================================
 
 function buildHeaderMap(fileHeaders) {
@@ -140,10 +143,8 @@ function buildHeaderMap(fileHeaders) {
   for (const eh of EXPECTED_HEADERS) {
     const num = headerNumber(eh);
     if (num) {
-      // Matcheo por número
       map[eh] = byNum[num] || null;
     } else {
-      // Matcheo por texto canon
       map[eh] = byCanon[canonHeader(eh)] || null;
     }
   }
@@ -152,10 +153,7 @@ function buildHeaderMap(fileHeaders) {
 }
 
 function validateHeaders(fileHeaders, headerMap) {
-  // Ya NO bloqueamos por "extras".
-  // Solo bloqueamos si faltan columnas necesarias para que el scoring tenga sentido.
   const missing = EXPECTED_HEADERS.filter(eh => !headerMap[eh]);
-
   if (missing.length) {
     throw new Error(
       "El XLSX no trae algunas columnas esperadas (faltantes):\n\n" +
@@ -167,79 +165,202 @@ function validateHeaders(fileHeaders, headerMap) {
 
 
 // ======================================================
-// GATES (FASE A2)
+// GATES (FASE A2) + CORRECT/INCORRECT
 // ======================================================
 
-function applyGates(row) {
+function evalGate(gate, value) {
+  if (gate.type === "equals") {
+    const ok = value !== gate.value; // si es igual al valor bloqueante => falla
+    return { ok, why: ok ? `OK: ${gate.header}` : `FALLA ${gate.id}: ${gate.reason}` };
+  }
+
+  if (gate.type === "min_lines") {
+    const lines = countValidLines(value, gate.min_chars_per_line);
+    const ok = lines >= gate.min_lines;
+    return {
+      ok,
+      why: ok
+        ? `OK: ${gate.header} (líneas válidas: ${lines})`
+        : `FALLA ${gate.id}: ${gate.reason} (líneas válidas: ${lines}/${gate.min_lines})`
+    };
+  }
+
+  if (gate.type === "contains_all") {
+    const norm = normalizeText(value);
+    const ok = gate.value.every(v => norm.includes(normalizeText(v)));
+    return {
+      ok,
+      why: ok
+        ? `OK: ${gate.header} (aceptó reglas)`
+        : `FALLA ${gate.id}: ${gate.reason}`
+    };
+  }
+
+  // desconocido: no bloquea
+  return { ok: true, why: `OK: ${gate.header}` };
+}
+
+function applyGatesWithExplain(row) {
+  const correct = [];
+  const incorrect = [];
+
   for (const gate of RULES.gates) {
     const value = row[gate.header] || "";
+    const r = evalGate(gate, value);
 
-    if (gate.type === "equals" && value === gate.value) return gate.reason;
-
-    if (gate.type === "min_lines") {
-      if (countValidLines(value, gate.min_chars_per_line) < gate.min_lines) {
-        return gate.reason;
-      }
+    if (r.ok) {
+      correct.push(r.why);
+      continue;
     }
 
-    if (gate.type === "contains_all") {
-      const norm = normalizeText(value);
-      if (!gate.value.every(v => norm.includes(normalizeText(v)))) {
-        return gate.reason;
-      }
-    }
+    incorrect.push(r.why);
+    return {
+      failed: true,
+      reason: gate.reason,
+      correct,
+      incorrect
+    };
   }
 
+  // banned gate
   if (RULES.banned_words_gate?.enabled) {
+    let found = null;
     for (const v of Object.values(row)) {
-      if (hasBanned(v)) return RULES.banned_words_gate.reason;
+      if (hasBanned(v)) { found = v; break; }
+    }
+
+    if (found) {
+      incorrect.push(`${RULES.banned_words_gate.reason} (detectado en texto)`);
+      return {
+        failed: true,
+        reason: RULES.banned_words_gate.reason,
+        correct,
+        incorrect
+      };
+    } else {
+      correct.push("OK: sin palabras prohibidas (banned_words)");
     }
   }
 
-  return null;
+  return { failed: false, reason: null, correct, incorrect };
 }
 
 
 // ======================================================
-// SCORING (FASE B)
+// SCORING (FASE B) + CORRECT/INCORRECT
 // ======================================================
 
-function applyScoring(row) {
+function applyScoringWithExplain(row) {
   let total = 0;
+  const correct = [];
+  const incorrect = [];
+
+  // Max score: asumimos 100 por diseño, pero lo guardamos explícito
+  const maxScore = 100;
 
   for (const [block, ruleset] of Object.entries(RULES.scoring)) {
 
     if (block === "canales") {
       let subtotal = 0;
+
       for (const r of ruleset.rules) {
         const value = row[r.header] || "";
-        if (r.type === "min_lines" &&
-            countValidLines(value, r.min_chars_per_line) >= r.min_lines) {
-          subtotal += r.points;
+
+        if (r.type === "min_lines") {
+          const lines = countValidLines(value, r.min_chars_per_line);
+          const ok = lines >= r.min_lines;
+          if (ok) {
+            subtotal += r.points;
+            correct.push(`+${r.points} [${block}] ${r.header} (líneas válidas: ${lines})`);
+          } else {
+            incorrect.push(`[${block}] ${r.header} (líneas válidas: ${lines}/${r.min_lines})`);
+          }
+          continue;
         }
+
         if (r.type === "map") {
-          subtotal += (r.points_map?.[value] || 0);
+          const pts = (r.points_map?.[value] || 0);
+          if (pts > 0) {
+            correct.push(`+${pts} [${block}] ${r.header} = "${safeStr(value)}"`);
+          } else {
+            incorrect.push(`[${block}] ${r.header} = "${safeStr(value)}" (0 pts)`);
+          }
+          subtotal += pts;
         }
       }
-      total += Math.min(subtotal, ruleset.cap);
+
+      const applied = Math.min(subtotal, ruleset.cap);
+      total += applied;
+
+      if (subtotal > ruleset.cap) {
+        correct.push(`[${block}] cap aplicado: ${applied}/${ruleset.cap}`);
+      } else {
+        correct.push(`[${block}] subtotal: ${applied}/${ruleset.cap}`);
+      }
+
       continue;
     }
 
+    // blocks array
     for (const r of ruleset) {
       const value = row[r.header] || "";
-      if (r.type === "equals" && value === r.value) total += r.points;
-      if (r.type === "min_length" && value.length >= r.min_chars) total += r.points;
+
+      if (r.type === "equals") {
+        const ok = value === r.value;
+        if (ok) {
+          total += r.points;
+          correct.push(`+${r.points} [${block}] ${r.header} = "${safeStr(value)}"`);
+        } else {
+          incorrect.push(`[${block}] ${r.header} (esperado: "${r.value}", recibido: "${safeStr(value)}")`);
+        }
+        continue;
+      }
+
+      if (r.type === "min_length") {
+        const ok = safeStr(value).length >= r.min_chars;
+        if (ok) {
+          total += r.points;
+          correct.push(`+${r.points} [${block}] ${r.header} (len ≥ ${r.min_chars})`);
+        } else {
+          incorrect.push(`[${block}] ${r.header} (len ${safeStr(value).length}/${r.min_chars})`);
+        }
+        continue;
+      }
+
       if (r.type === "contains_all") {
         const norm = normalizeText(value);
-        if (r.value.every(v => norm.includes(normalizeText(v)))) total += r.points;
+        const ok = r.value.every(v => norm.includes(normalizeText(v)));
+        if (ok) {
+          total += r.points;
+          correct.push(`+${r.points} [${block}] ${r.header} (contiene reglas)`);
+        } else {
+          incorrect.push(`[${block}] ${r.header} (faltan reglas obligatorias)`);
+        }
+        continue;
       }
+
       if (r.type === "min_length_with_action") {
-        if (value.length >= r.min_chars && hasActionVerb(value)) total += r.points;
+        const okLen = safeStr(value).length >= r.min_chars;
+        const okVerb = hasActionVerb(value);
+        const ok = okLen && okVerb;
+
+        if (ok) {
+          total += r.points;
+          correct.push(`+${r.points} [${block}] ${r.header} (len ≥ ${r.min_chars} + verbo acción)`);
+        } else {
+          const why = [];
+          if (!okLen) why.push(`len ${safeStr(value).length}/${r.min_chars}`);
+          if (!okVerb) why.push("sin verbo de acción");
+          incorrect.push(`[${block}] ${r.header} (${why.join(" + ")})`);
+        }
       }
     }
   }
 
-  return total;
+  // clamp por seguridad
+  total = Math.max(0, Math.min(maxScore, total));
+
+  return { total, maxScore, correct, incorrect };
 }
 
 
@@ -264,16 +385,16 @@ function applyFlags(row) {
 
   for (const h of FLAG_FIELDS) {
     const v = row[h] || "";
-    if (v.length < 120) flags.push("FLAG_TEXTO_CORTO");
+    if (safeStr(v).length < 120) flags.push("FLAG_TEXTO_CORTO");
     if (isGeneric(v)) flags.push("FLAG_TEXTO_GENERICO");
     if (!hasActionVerb(v)) flags.push("FLAG_SIN_VERBOS");
-    if (/ingres|ganar|rentab|facil|garant/i.test(v)) {
+    if (/ingres|ganar|rentab|facil|garant/i.test(safeStr(v))) {
       flags.push("FLAG_RIESGO_MARKETING");
     }
   }
 
-  if (!row["9/33. Email de contacto (confirmación)"]?.includes("@") ||
-      !/(http|@)/.test(row["11/33. Perfil de red social principal"] || "")) {
+  if (!safeStr(row["9/33. Email de contacto (confirmación)"]).includes("@") ||
+      !/(http|@)/.test(safeStr(row["11/33. Perfil de red social principal"]))) {
     flags.push("FLAG_DATOS_INCONSISTENTES");
   }
 
@@ -348,35 +469,42 @@ fileInput.addEventListener("change", async () => {
         obj[eh] = (idx !== undefined) ? (row[idx] ?? "") : "";
       }
 
-      const gateReason = applyGates(obj);
-
       // Datos mínimos para UI
       const nombre = obj["8/33. Nombre y apellido"] || "";
       const email = obj["9/33. Email de contacto (confirmación)"] || "";
 
-      if (gateReason) {
+      // Gates + explicación
+      const gate = applyGatesWithExplain(obj);
+
+      if (gate.failed) {
         return {
           fila: i + 2,
           nombre,
           email,
           score: 0,
+          maxScore: 100,
           estado: "DESCARTADO_AUTO",
-          motivo: gateReason,
+          motivo: gate.reason,
           flags: [],
+          correct: gate.correct,
+          incorrect: gate.incorrect,
           rowRaw: obj
         };
       }
 
-      const score = applyScoring(obj);
+      // Scoring + explicación
+      const sc = applyScoringWithExplain(obj);
+
+      // Flags (no deciden)
       const flags = applyFlags(obj);
 
       let estado = "DESCARTADO";
       let motivo = "";
 
-      if (score >= RULES.thresholds.approve_min) {
+      if (sc.total >= RULES.thresholds.approve_min) {
         estado = "APTO";
         motivo = `Score ≥ ${RULES.thresholds.approve_min}`;
-      } else if (score >= RULES.thresholds.review_min) {
+      } else if (sc.total >= RULES.thresholds.review_min) {
         estado = "REVISAR";
         motivo = `Score ${RULES.thresholds.review_min}–${RULES.thresholds.approve_min - 1}`;
       } else {
@@ -388,16 +516,28 @@ fileInput.addEventListener("change", async () => {
         fila: i + 2,
         nombre,
         email,
-        score,
+        score: sc.total,
+        maxScore: sc.maxScore,
         estado,
         motivo,
         flags,
+        correct: [...gate.correct, ...sc.correct],
+        incorrect: [...gate.incorrect, ...sc.incorrect],
         rowRaw: obj
       };
     });
 
+    // Meta para historial
+    const now = new Date();
+    const meta = {
+      runId: `${now.getTime()}_${Math.random().toString(16).slice(2)}`,
+      runAt: now.toLocaleString(),
+      fileName: file.name,
+      fingerprint: `${file.name}|${file.size}|${file.lastModified}`
+    };
+
     // Render FASE D (UI)
-    UI.renderAll({ results, version });
+    UI.renderAll({ results, version, meta });
 
     // Debug
     console.log("RESULTADO FINAL:", results);
