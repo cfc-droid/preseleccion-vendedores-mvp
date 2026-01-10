@@ -8,15 +8,23 @@
 
   <h1>Preselección automática de colaboradores</h1>
 
-  <p>Subí el archivo XLSX o CSV exportado desde Google Forms.</p>
+  <p>Subí el archivo XLSX exportado desde Google Forms.</p>
 
-  <input type="file" id="fileInput" accept=".xlsx,.csv" />
+  <input type="file" id="fileInput" accept=".xlsx" />
 
   <div id="output"></div>
 
- <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <hr />
 
- <script src="app.js"></script>
- 
+  <div id="filters"></div>
+
+  <div id="resultsTable"></div>
+
+  <div id="detailPanel" style="display:none; border:1px solid #ccc; padding:10px; margin-top:10px;"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+  <script src="ui.js"></script>
+
 </body>
 </html>
