@@ -4,19 +4,16 @@
     "input_columns_required": 35,
     "description": "Reglas oficiales de gates y scoring. FASE A2 (gates) + FASE B (scoring completo)."
   },
-
   "states": {
     "discarded": "DESCARTADO_AUTO",
     "review": "REVISAR",
     "approved": "APTO"
   },
-
   "thresholds": {
     "discard_max": 69,
     "review_min": 70,
     "approve_min": 85
   },
-
   "weights": {
     "filtros": 25,
     "experiencia": 15,
@@ -25,11 +22,6 @@
     "etica": 10,
     "prueba": 15
   },
-
-  // ======================================================
-  // GATES DUROS (FASE A2)
-  // ======================================================
-
   "gates": [
     {
       "id": "G2",
@@ -88,23 +80,13 @@
       "reason": "Gate G24: No acepta todas las reglas éticas"
     }
   ],
-
   "banned_words_gate": {
     "enabled": true,
     "scope": "all_text_fields",
     "words_source": "banned_words.json",
     "reason": "Gate GBAN: Lenguaje prohibido"
   },
-
-  // ======================================================
-  // SCORING (FASE B)
-  // ======================================================
-
   "scoring": {
-
-    // --------------------------------------------------
-    // B1 — FILTROS (25 pts)
-    // --------------------------------------------------
     "filtros": [
       {
         "header": "2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?",
@@ -125,10 +107,6 @@
         "points": 5
       }
     ],
-
-    // --------------------------------------------------
-    // B2 — EXPERIENCIA (15 pts)
-    // --------------------------------------------------
     "experiencia": [
       {
         "header": "12/33. ¿Vendiste productos digitales o educativos antes?",
@@ -143,10 +121,6 @@
         "points": 5
       }
     ],
-
-    // --------------------------------------------------
-    // B3 — CANALES (20 pts, cap)
-    // --------------------------------------------------
     "canales": {
       "cap": 20,
       "rules": [
@@ -182,10 +156,6 @@
         }
       ]
     },
-
-    // --------------------------------------------------
-    // B4 — COMPRENSIÓN (15 pts)
-    // --------------------------------------------------
     "comprension": [
       {
         "header": "21/33. ¿Qué significa cobrar solo por resultados?",
@@ -206,10 +176,6 @@
         "points": 5
       }
     ],
-
-    // --------------------------------------------------
-    // B5 — ÉTICA (10 pts)
-    // --------------------------------------------------
     "etica": [
       {
         "header": "24/33. Aceptación de reglas",
@@ -224,10 +190,6 @@
         "points": 10
       }
     ],
-
-    // --------------------------------------------------
-    // B6 — PRUEBA PRÁCTICA (15 pts)
-    // --------------------------------------------------
     "prueba": [
       {
         "header": "27/33. DM de presentación del producto",
