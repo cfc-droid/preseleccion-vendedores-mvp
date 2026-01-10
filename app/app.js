@@ -1,12 +1,9 @@
 // ======================================================
 // PRESELECCIÓN VENDEDORES — MVP
-// PASO 15 + 16 + 17 + FASE A2
+// PASO 15 + 16 + 17 + FASE A2 + FASE B1
 // - Lee XLSX exportado desde Google Sheets
-// - Valida estructura fija de columnas (LOCKED)
-// - Mapea semánticamente cada fila
-// - Ejecuta GATES DUROS (DESCARTADO_AUTO)
-// - Ejecuta Gate de palabras prohibidas (GBAN)
-// NO calcula score todavía (FASE B después)
+// - Ejecuta GATES DUROS + GBAN
+// - Ejecuta SCORING B1 (Filtros 25 pts)
 // ======================================================
 
 
@@ -103,17 +100,15 @@ function containsBannedWord(text, bannedWords) {
 
 
 // ======================================================
-// EJECUCIÓN DE GATES DUROS
+// GATES
 // ======================================================
 
 function applyGates(row, rules) {
   for (const gate of rules.gates) {
     const value = row._raw[gate.header] || "";
 
-    if (gate.type === "equals") {
-      if (value === gate.value) {
-        return gate.reason;
-      }
+    if (gate.type === "equals" && value === gate.value) {
+      return gate.reason;
     }
 
     if (gate.type === "min_lines") {
@@ -136,7 +131,6 @@ function applyGates(row, rules) {
       }
     }
   }
-
   return null;
 }
 
@@ -144,13 +138,34 @@ function applyBannedWordsGate(row, rules, bannedWords) {
   if (!rules.banned_words_gate?.enabled) return null;
 
   for (const value of Object.values(row._raw)) {
-    const found = containsBannedWord(value, bannedWords);
-    if (found) {
+    if (containsBannedWord(value, bannedWords)) {
       return rules.banned_words_gate.reason;
     }
   }
-
   return null;
+}
+
+
+// ======================================================
+// FASE B1 — SCORING FILTROS (25 pts)
+// ======================================================
+
+function scoreFiltros(row) {
+  let score = 0;
+
+  if (row._raw["2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?"] === "Sí") {
+    score += 10;
+  }
+
+  if (row._raw["3/33. ¿Buscás empleo o sueldo?"] === "No") {
+    score += 10;
+  }
+
+  if (row._raw["6/33. ¿Leíste completo el anuncio y la advertencia?"] === "Sí") {
+    score += 5;
+  }
+
+  return score;
 }
 
 
@@ -172,7 +187,6 @@ fileInput.addEventListener("change", async () => {
 
   if (!file.name.toLowerCase().endsWith(".xlsx")) {
     alert("Archivo inválido. Solo se acepta XLSX exportado desde Google Sheets.");
-    fileInput.value = "";
     return;
   }
 
@@ -181,40 +195,13 @@ fileInput.addEventListener("change", async () => {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  if (!rows.length) {
-    alert("El archivo está vacío.");
-    return;
-  }
-
   const headers = rows[0];
   const dataRows = rows.slice(1);
 
-  // VALIDAR HEADERS
-  const missingHeaders = EXPECTED_HEADERS.filter(h => !headers.includes(h));
-  const extraHeaders = headers.filter(h => !EXPECTED_HEADERS.includes(h));
-
-  if (extraHeaders.length > 0) {
-    alert(
-      "ERROR: El archivo tiene columnas NO esperadas:\n\n" +
-      extraHeaders.join("\n")
-    );
-    return;
-  }
-
-  if (missingHeaders.length > 0) {
-    console.warn("ATENCIÓN: Faltan columnas:", missingHeaders);
-  }
-
-  // MAPEO SIMPLE
   const mappedRows = dataRows.map((row, i) => {
     const raw = {};
-    headers.forEach((h, idx) => {
-      raw[h] = row[idx] ?? "";
-    });
-    return {
-      _row_excel: i + 2,
-      _raw: raw
-    };
+    headers.forEach((h, idx) => raw[h] = row[idx] ?? "");
+    return { _row_excel: i + 2, _raw: raw };
   });
 
   const rules = await loadRules();
@@ -222,9 +209,11 @@ fileInput.addEventListener("change", async () => {
     rules.banned_words_gate.words_source
   );
 
-  // APLICAR GATES
   const evaluated = mappedRows.map(row => {
-    const gateReason = applyGates(row, rules);
+    const gateReason =
+      applyGates(row, rules) ||
+      applyBannedWordsGate(row, rules, bannedWords);
+
     if (gateReason) {
       return {
         ...row,
@@ -234,20 +223,12 @@ fileInput.addEventListener("change", async () => {
       };
     }
 
-    const bannedReason = applyBannedWordsGate(row, rules, bannedWords);
-    if (bannedReason) {
-      return {
-        ...row,
-        estado: rules.states.discarded,
-        score: 0,
-        motivo: bannedReason
-      };
-    }
+    const scoreB1 = scoreFiltros(row);
 
     return {
       ...row,
       estado: "PASA_GATES",
-      score: null,
+      score: scoreB1,
       motivo: null
     };
   });
@@ -263,5 +244,5 @@ fileInput.addEventListener("change", async () => {
     <p>Pasan a scoring: ${evaluated.length - descartados}</p>
   `;
 
-  console.log("Resultado completo:", evaluated);
+  console.log("Resultado B1:", evaluated);
 });
