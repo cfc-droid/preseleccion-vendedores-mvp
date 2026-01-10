@@ -1,12 +1,14 @@
 // ======================================================
 // PRESELECCIÓN VENDEDORES — MVP
-// Paso 15 + Paso 16
-// Lee XLSX exportado desde Google Sheets
-// Valida estructura fija de 35 columnas (LOCKED)
+// Paso 15 + Paso 16 + Paso 17
+// - Lee XLSX exportado desde Google Sheets
+// - Valida estructura fija de columnas (LOCKED)
+// - Mapea semánticamente cada fila
 // NO aplica reglas
 // NO calcula score
 // NO descarta perfiles
 // ======================================================
+
 
 // ===== CONFIGURACIÓN FORMULARIO (LOCKED) =====
 // Estas son las ÚNICAS columnas esperadas.
@@ -51,10 +53,29 @@ const EXPECTED_HEADERS = [
   "33/33. Si en 30 días no generás ventas, ¿cómo lo interpretás?"
 ];
 
+
+// ===== CLASIFICACIÓN SEMÁNTICA (POR BLOQUES) =====
+// Índices 0-based sobre el XLSX
+
+const COLUMN_SECTIONS = {
+  system: [0, 1],
+  filtros: [2, 3, 4, 5, 6, 7],
+  identidad: [8, 9, 10, 11],
+  experiencia: [12, 13, 14, 15],
+  canales: [16, 17, 18, 19],
+  etica_gate: [20],
+  comprension: [21, 22, 23],
+  etica: [24, 25, 26],
+  prueba: [27, 28, 29, 30],
+  cierre: [31, 32, 33]
+};
+
+
 // ===== ELEMENTOS DOM =====
 
 const fileInput = document.getElementById("fileInput");
 const output = document.getElementById("output");
+
 
 // ===== EVENTO PRINCIPAL =====
 
@@ -62,10 +83,8 @@ fileInput.addEventListener("change", async () => {
   const file = fileInput.files[0];
   if (!file) return;
 
-  const name = file.name.toLowerCase();
-
   // Validación estricta: SOLO XLSX
-  if (!name.endsWith(".xlsx")) {
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
     alert("Archivo inválido. Solo se acepta XLSX exportado desde Google Sheets.");
     fileInput.value = "";
     return;
@@ -75,10 +94,7 @@ fileInput.addEventListener("change", async () => {
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
 
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-
-  // Leer como matriz (filas crudas)
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
   if (!rows.length) {
@@ -89,26 +105,20 @@ fileInput.addEventListener("change", async () => {
   const headers = rows[0];
   const dataRows = rows.slice(1);
 
-  // ===== VALIDACIÓN DE ESTRUCTURA =====
 
-  const missingHeaders = EXPECTED_HEADERS.filter(
-    h => !headers.includes(h)
-  );
+  // ===== VALIDACIÓN DE HEADERS =====
 
-  const extraHeaders = headers.filter(
-    h => !EXPECTED_HEADERS.includes(h)
-  );
+  const missingHeaders = EXPECTED_HEADERS.filter(h => !headers.includes(h));
+  const extraHeaders = headers.filter(h => !EXPECTED_HEADERS.includes(h));
 
-  // Si hay columnas extra → ERROR DURO
   if (extraHeaders.length > 0) {
     alert(
-      "ERROR: El archivo tiene columnas NO esperadas.\n\n" +
+      "ERROR: El archivo tiene columnas NO esperadas:\n\n" +
       extraHeaders.join("\n")
     );
     return;
   }
 
-  // Si faltan columnas → aviso (permitido)
   if (missingHeaders.length > 0) {
     console.warn(
       "ATENCIÓN: Faltan columnas (posible reducción futura):",
@@ -116,18 +126,56 @@ fileInput.addEventListener("change", async () => {
     );
   }
 
+
+  // ===== MAPEO SEMÁNTICO DE FILAS =====
+
+  const mappedRows = dataRows.map((row, rowIndex) => {
+    const entry = {
+      _row_excel: rowIndex + 2,
+      _raw: {},
+      sections: {
+        system: {},
+        filtros: {},
+        identidad: {},
+        experiencia: {},
+        canales: {},
+        etica_gate: {},
+        comprension: {},
+        etica: {},
+        prueba: {},
+        cierre: {}
+      }
+    };
+
+    headers.forEach((header, colIndex) => {
+      const value = row[colIndex] ?? "";
+      entry._raw[header] = value;
+
+      Object.entries(COLUMN_SECTIONS).forEach(([section, indices]) => {
+        if (indices.includes(colIndex)) {
+          entry.sections[section][header] = value;
+        }
+      });
+    });
+
+    return entry;
+  });
+
+
   // ===== LOGS DE CONTROL =====
 
   console.log("Columnas detectadas:", headers);
   console.log("Cantidad de columnas:", headers.length);
-  console.log("Filas detectadas:", dataRows.length);
+  console.log("Filas detectadas:", mappedRows.length);
+  console.log("Ejemplo fila mapeada:", mappedRows[0]);
+
 
   // ===== SALIDA VISUAL =====
 
   output.innerHTML = `
-    <p><strong>Archivo cargado correctamente</strong></p>
+    <p><strong>Archivo cargado y mapeado correctamente</strong></p>
     <p>Columnas detectadas: ${headers.length}</p>
-    <p>Filas detectadas: ${dataRows.length}</p>
+    <p>Filas procesadas: ${mappedRows.length}</p>
     ${
       missingHeaders.length > 0
         ? `<p style="color:#c49b00;">Columnas faltantes: ${missingHeaders.length}</p>`
