@@ -1,9 +1,7 @@
 // ======================================================
 // PRESELECCIÓN VENDEDORES — MVP
-// PASO 15 + 16 + 17 + FASE A2 + FASE B1
-// - Lee XLSX exportado desde Google Sheets
-// - Ejecuta GATES DUROS + GBAN
-// - Ejecuta SCORING B1 (Filtros 25 pts)
+// FASE A2 (GATES) + FASE B (SCORING COMPLETO)
+// Motor 100% cliente, reglas en rules_v1.json
 // ======================================================
 
 
@@ -54,21 +52,11 @@ const EXPECTED_HEADERS = [
 // CARGA DE REGLAS
 // ======================================================
 
-let RULES = null;
-let BANNED_WORDS = null;
+let RULES, BANNED_WORDS, ACTION_VERBS;
 
-async function loadRules() {
-  if (RULES) return RULES;
-  const res = await fetch("/rules/rules_v1.json");
-  RULES = await res.json();
-  return RULES;
-}
-
-async function loadBannedWords(path) {
-  if (BANNED_WORDS) return BANNED_WORDS;
-  const res = await fetch(`/rules/${path}`);
-  BANNED_WORDS = await res.json();
-  return BANNED_WORDS;
+async function loadJSON(path) {
+  const res = await fetch(path);
+  return res.json();
 }
 
 
@@ -84,6 +72,16 @@ function normalizeText(text) {
     .trim();
 }
 
+function hasBanned(text) {
+  const norm = normalizeText(text);
+  return BANNED_WORDS.some(w => norm.includes(normalizeText(w)));
+}
+
+function hasActionVerb(text) {
+  const norm = normalizeText(text);
+  return ACTION_VERBS.some(v => norm.includes(normalizeText(v)));
+}
+
 function countValidLines(text, minChars) {
   return normalizeText(text)
     .split("\n")
@@ -91,81 +89,101 @@ function countValidLines(text, minChars) {
     .filter(l => l.length >= minChars).length;
 }
 
-function containsBannedWord(text, bannedWords) {
-  const norm = normalizeText(text);
-  return bannedWords.find(word =>
-    norm.includes(normalizeText(word))
-  );
-}
-
 
 // ======================================================
-// GATES
+// GATES (FASE A2)
 // ======================================================
 
-function applyGates(row, rules) {
-  for (const gate of rules.gates) {
-    const value = row._raw[gate.header] || "";
+function applyGates(row) {
+  for (const gate of RULES.gates) {
+    const value = row[gate.header] || "";
 
     if (gate.type === "equals" && value === gate.value) {
       return gate.reason;
     }
 
     if (gate.type === "min_lines") {
-      const validLines = countValidLines(
-        value,
-        gate.min_chars_per_line
-      );
-      if (validLines < gate.min_lines) {
+      if (countValidLines(value, gate.min_chars_per_line) < gate.min_lines) {
         return gate.reason;
       }
     }
 
     if (gate.type === "contains_all") {
       const norm = normalizeText(value);
-      const ok = gate.value.every(v =>
-        norm.includes(normalizeText(v))
-      );
-      if (!ok) {
-        return gate.reason;
+      const ok = gate.value.every(v => norm.includes(normalizeText(v)));
+      if (!ok) return gate.reason;
+    }
+  }
+
+  if (RULES.banned_words_gate?.enabled) {
+    for (const v of Object.values(row)) {
+      if (hasBanned(v)) return RULES.banned_words_gate.reason;
+    }
+  }
+
+  return null;
+}
+
+
+// ======================================================
+// SCORING (FASE B COMPLETA)
+// ======================================================
+
+function applyScoring(row) {
+  let total = 0;
+
+  for (const [block, ruleset] of Object.entries(RULES.scoring)) {
+
+    // B3 — CANALES (con cap)
+    if (block === "canales") {
+      let subtotal = 0;
+
+      for (const r of ruleset.rules) {
+        const value = row[r.header] || "";
+
+        if (r.type === "min_lines") {
+          if (countValidLines(value, r.min_chars_per_line) >= r.min_lines) {
+            subtotal += r.points;
+          }
+        }
+
+        if (r.type === "map") {
+          subtotal += r.points_map[value] || 0;
+        }
+      }
+
+      total += Math.min(subtotal, ruleset.cap);
+      continue;
+    }
+
+    // Bloques simples
+    for (const r of ruleset) {
+      const value = row[r.header] || "";
+
+      if (r.type === "equals" && value === r.value) {
+        total += r.points;
+      }
+
+      if (r.type === "min_length" && value.length >= r.min_chars) {
+        total += r.points;
+      }
+
+      if (r.type === "contains_all") {
+        const norm = normalizeText(value);
+        if (r.value.every(v => norm.includes(normalizeText(v)))) {
+          total += r.points;
+        }
+      }
+
+      if (r.type === "min_length_with_action") {
+        if (value.length >= r.min_chars && hasActionVerb(value)) {
+          total += r.points;
+        }
       }
     }
   }
-  return null;
-}
 
-function applyBannedWordsGate(row, rules, bannedWords) {
-  if (!rules.banned_words_gate?.enabled) return null;
-
-  for (const value of Object.values(row._raw)) {
-    if (containsBannedWord(value, bannedWords)) {
-      return rules.banned_words_gate.reason;
-    }
-  }
-  return null;
-}
-
-
-// ======================================================
-// FASE B1 — SCORING FILTROS (25 pts)
-// ======================================================
-
-function scoreFiltros(row) {
-  let score = 0;
-
-  if (row._raw["2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?"] === "Sí") {
-    score += 10;
-  }
-
-  if (row._raw["3/33. ¿Buscás empleo o sueldo?"] === "No") {
-    score += 10;
-  }
-
-  if (row._raw["6/33. ¿Leíste completo el anuncio y la advertencia?"] === "Sí") {
-    score += 5;
-  }
-
-  return score;
+  return total;
 }
 
 
@@ -183,12 +201,14 @@ const output = document.getElementById("output");
 
 fileInput.addEventListener("change", async () => {
   const file = fileInput.files[0];
-  if (!file) return;
-
-  if (!file.name.toLowerCase().endsWith(".xlsx")) {
-    alert("Archivo inválido. Solo se acepta XLSX exportado desde Google Sheets.");
+  if (!file || !file.name.endsWith(".xlsx")) {
+    alert("Solo XLSX exportado desde Google Sheets.");
     return;
   }
+
+  RULES = await loadJSON("/rules/rules_v1.json");
+  BANNED_WORDS = await loadJSON("/rules/banned_words.json");
+  ACTION_VERBS = await loadJSON("/rules/action_verbs.json");
 
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
@@ -198,51 +218,35 @@ fileInput.addEventListener("change", async () => {
   const headers = rows[0];
   const dataRows = rows.slice(1);
 
-  const mappedRows = dataRows.map((row, i) => {
-    const raw = {};
-    headers.forEach((h, idx) => raw[h] = row[idx] ?? "");
-    return { _row_excel: i + 2, _raw: raw };
-  });
+  const results = dataRows.map((row, i) => {
+    const obj = {};
+    headers.forEach((h, idx) => obj[h] = row[idx] ?? "");
 
-  const rules = await loadRules();
-  const bannedWords = await loadBannedWords(
-    rules.banned_words_gate.words_source
-  );
-
-  const evaluated = mappedRows.map(row => {
-    const gateReason =
-      applyGates(row, rules) ||
-      applyBannedWordsGate(row, rules, bannedWords);
-
+    const gateReason = applyGates(obj);
     if (gateReason) {
       return {
-        ...row,
-        estado: rules.states.discarded,
+        fila: i + 2,
         score: 0,
+        estado: RULES.states.discarded,
         motivo: gateReason
       };
     }
 
-    const scoreB1 = scoreFiltros(row);
+    const score = applyScoring(obj);
+    const estado =
+      score >= RULES.thresholds.approve_min ? RULES.states.approved :
+      score >= RULES.thresholds.review_min ? RULES.states.review :
+      RULES.states.discarded;
 
-    return {
-      ...row,
-      estado: "PASA_GATES",
-      score: scoreB1,
-      motivo: null
-    };
+    return { fila: i + 2, score, estado };
   });
 
-  const descartados = evaluated.filter(
-    r => r.estado === rules.states.discarded
-  ).length;
-
   output.innerHTML = `
-    <p><strong>Archivo procesado</strong></p>
-    <p>Total filas: ${evaluated.length}</p>
-    <p>Descartados por gates: ${descartados}</p>
-    <p>Pasan a scoring: ${evaluated.length - descartados}</p>
+    <p>Total filas: ${results.length}</p>
+    <p>APTO: ${results.filter(r => r.estado === RULES.states.approved).length}</p>
+    <p>REVISAR: ${results.filter(r => r.estado === RULES.states.review).length}</p>
+    <p>DESCARTADO: ${results.filter(r => r.estado === RULES.states.discarded).length}</p>
   `;
 
-  console.log("Resultado B1:", evaluated);
+  console.log("RESULTADO FINAL:", results);
 });
