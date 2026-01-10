@@ -1,6 +1,7 @@
 // ======================================================
 // PRESELECCIÓN VENDEDORES — MVP
 // FASE A2 (GATES) + FASE B (SCORING) + FASE C (FLAGS)
+// + FASE D (SALIDA UI) -> ui.js
 // ======================================================
 
 
@@ -55,6 +56,7 @@ let RULES, BANNED_WORDS, ACTION_VERBS, GENERIC_WORDS;
 
 async function loadJSON(path) {
   const res = await fetch(path);
+  if (!res.ok) throw new Error(`No se pudo cargar ${path} (HTTP ${res.status})`);
   return res.json();
 }
 
@@ -73,12 +75,12 @@ function normalizeText(text) {
 
 function hasBanned(text) {
   const norm = normalizeText(text);
-  return BANNED_WORDS.some(w => norm.includes(normalizeText(w)));
+  return (BANNED_WORDS || []).some(w => norm.includes(normalizeText(w)));
 }
 
 function hasActionVerb(text) {
   const norm = normalizeText(text);
-  return ACTION_VERBS.some(v => norm.includes(normalizeText(v)));
+  return (ACTION_VERBS || []).some(v => norm.includes(normalizeText(v)));
 }
 
 function countValidLines(text, minChars) {
@@ -91,10 +93,27 @@ function countValidLines(text, minChars) {
 function isGeneric(text) {
   const norm = normalizeText(text);
   let hits = 0;
-  for (const w of GENERIC_WORDS) {
+  for (const w of (GENERIC_WORDS || [])) {
     if (norm.includes(normalizeText(w))) hits++;
   }
   return hits >= 2;
+}
+
+
+// ======================================================
+// VALIDACIÓN HEADERS (bloquea columnas extra)
+// tolera reducción futura (si faltan, OK)
+// ======================================================
+
+function validateHeaders(fileHeaders) {
+  const extras = fileHeaders.filter(h => !EXPECTED_HEADERS.includes(h));
+  if (extras.length) {
+    throw new Error(
+      "El XLSX tiene columnas extra NO permitidas:\n\n" +
+      extras.map(x => `- ${x}`).join("\n") +
+      "\n\nSolución: exportá de nuevo desde Google Sheets sin agregar columnas."
+    );
+  }
 }
 
 
@@ -150,7 +169,7 @@ function applyScoring(row) {
           subtotal += r.points;
         }
         if (r.type === "map") {
-          subtotal += r.points_map[value] || 0;
+          subtotal += (r.points_map?.[value] || 0);
         }
       }
       total += Math.min(subtotal, ruleset.cap);
@@ -226,57 +245,103 @@ const output = document.getElementById("output");
 // ======================================================
 
 fileInput.addEventListener("change", async () => {
-  const file = fileInput.files[0];
-  if (!file || !file.name.endsWith(".xlsx")) {
-    alert("Solo XLSX exportado desde Google Sheets.");
-    return;
-  }
+  try {
+    UI.setStatus("Procesando…");
 
-  RULES = await loadJSON("/rules/rules_v1.json");
-  BANNED_WORDS = await loadJSON("/rules/banned_words.json");
-  ACTION_VERBS = await loadJSON("/rules/action_verbs.json");
-  GENERIC_WORDS = await loadJSON("/rules/generic_words.json");
-
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-  const headers = rows[0];
-  const dataRows = rows.slice(1);
-
-  const results = dataRows.map((row, i) => {
-    const obj = {};
-    headers.forEach((h, idx) => obj[h] = row[idx] ?? "");
-
-    const gateReason = applyGates(obj);
-    if (gateReason) {
-      return {
-        fila: i + 2,
-        score: 0,
-        estado: RULES.states.discarded,
-        motivo: gateReason,
-        flags: []
-      };
+    const file = fileInput.files[0];
+    if (!file || !file.name.endsWith(".xlsx")) {
+      alert("Solo XLSX exportado desde Google Sheets.");
+      UI.setStatus("Esperando XLSX…");
+      return;
     }
 
-    const score = applyScoring(obj);
-    const flags = applyFlags(obj);
+    // Cargamos reglas y auxiliares
+    RULES = await loadJSON("/rules/rules_v1.json");
+    BANNED_WORDS = await loadJSON("/rules/banned_words.json");
+    ACTION_VERBS = await loadJSON("/rules/action_verbs.json");
+    GENERIC_WORDS = await loadJSON("/rules/generic_words.json");
 
-    const estado =
-      score >= RULES.thresholds.approve_min ? RULES.states.approved :
-      score >= RULES.thresholds.review_min ? RULES.states.review :
-      RULES.states.discarded;
+    // Versionado (opcional pero útil)
+    let version = "—";
+    try {
+      const res = await fetch("/version/current.txt");
+      if (res.ok) version = (await res.text()).trim();
+    } catch (_) {}
 
-    return { fila: i + 2, score, estado, flags };
-  });
+    // Parse XLSX
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  output.innerHTML = `
-    <p>Total filas: ${results.length}</p>
-    <p>APTO: ${results.filter(r => r.estado === RULES.states.approved).length}</p>
-    <p>REVISAR: ${results.filter(r => r.estado === RULES.states.review).length}</p>
-    <p>DESCARTADO: ${results.filter(r => r.estado === RULES.states.discarded).length}</p>
-  `;
+    const headers = rows[0] || [];
+    const dataRows = rows.slice(1);
 
-  console.log("RESULTADO FINAL:", results);
+    validateHeaders(headers);
+
+    // Resultados por fila
+    const results = dataRows.map((row, i) => {
+      const obj = {};
+      headers.forEach((h, idx) => obj[h] = row[idx] ?? "");
+
+      const gateReason = applyGates(obj);
+
+      // Datos mínimos para UI
+      const nombre = obj["8/33. Nombre y apellido"] || "";
+      const email = obj["9/33. Email de contacto (confirmación)"] || "";
+
+      if (gateReason) {
+        return {
+          fila: i + 2,
+          nombre,
+          email,
+          score: 0,
+          estado: "DESCARTADO_AUTO",
+          motivo: gateReason,
+          flags: [],
+          rowRaw: obj
+        };
+      }
+
+      const score = applyScoring(obj);
+      const flags = applyFlags(obj);
+
+      let estado = "DESCARTADO";
+      let motivo = "";
+
+      if (score >= RULES.thresholds.approve_min) {
+        estado = "APTO";
+        motivo = `Score ≥ ${RULES.thresholds.approve_min}`;
+      } else if (score >= RULES.thresholds.review_min) {
+        estado = "REVISAR";
+        motivo = `Score ${RULES.thresholds.review_min}–${RULES.thresholds.approve_min - 1}`;
+      } else {
+        estado = "DESCARTADO";
+        motivo = `Score < ${RULES.thresholds.review_min}`;
+      }
+
+      return {
+        fila: i + 2,
+        nombre,
+        email,
+        score,
+        estado,
+        motivo,
+        flags,
+        rowRaw: obj
+      };
+    });
+
+    // Render FASE D (UI)
+    UI.renderAll({ results, version });
+
+    // Debug
+    console.log("RESULTADO FINAL:", results);
+
+  } catch (err) {
+    console.error(err);
+    alert(err.message || String(err));
+    UI.setStatus("Error");
+    output.innerHTML = `<p style="color:#ef4444;"><b>Error:</b> ${String(err.message || err)}</p>`;
+  }
 });
