@@ -1,4 +1,4 @@
-// Paso 13 — validar extensión del archivo
+// Paso 14 — detectar tipo de archivo (CSV o XLSX)
 
 const fileInput = document.getElementById("fileInput");
 
@@ -8,8 +8,10 @@ fileInput.addEventListener("change", () => {
 
   const name = file.name.toLowerCase();
 
-  if (name.endsWith(".xlsx") || name.endsWith(".csv")) {
-    console.log("Archivo válido:", name);
+  if (name.endsWith(".xlsx")) {
+    console.log("Tipo de archivo: XLSX");
+  } else if (name.endsWith(".csv")) {
+    console.log("Tipo de archivo: CSV");
   } else {
     alert("Archivo inválido. Solo se acepta XLSX o CSV exportado desde Google Sheets.");
     fileInput.value = "";
