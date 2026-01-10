@@ -52,14 +52,6 @@
       "reason": "Gate G7: Rechaza Hotmart"
     },
     {
-      "id": "G18",
-      "header": "18/33. Listá 3 lugares concretos donde podrías difundir",
-      "type": "min_lines",
-      "min_lines": 3,
-      "min_chars_per_line": 8,
-      "reason": "Gate G18: Menos de 3 lugares reales"
-    },
-    {
       "id": "G20",
       "header": "20/33. ¿Cuál de estas prácticas NO harías nunca?",
       "type": "equals",
