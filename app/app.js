@@ -1,7 +1,6 @@
 // ======================================================
 // PRESELECCIÓN VENDEDORES — MVP
-// FASE A2 (GATES) + FASE B (SCORING COMPLETO)
-// Motor 100% cliente, reglas en rules_v1.json
+// FASE A2 (GATES) + FASE B (SCORING) + FASE C (FLAGS)
 // ======================================================
 
 
@@ -52,7 +51,7 @@ const EXPECTED_HEADERS = [
 // CARGA DE REGLAS
 // ======================================================
 
-let RULES, BANNED_WORDS, ACTION_VERBS;
+let RULES, BANNED_WORDS, ACTION_VERBS, GENERIC_WORDS;
 
 async function loadJSON(path) {
   const res = await fetch(path);
@@ -89,6 +88,15 @@ function countValidLines(text, minChars) {
     .filter(l => l.length >= minChars).length;
 }
 
+function isGeneric(text) {
+  const norm = normalizeText(text);
+  let hits = 0;
+  for (const w of GENERIC_WORDS) {
+    if (norm.includes(normalizeText(w))) hits++;
+  }
+  return hits >= 2;
+}
+
 
 // ======================================================
 // GATES (FASE A2)
@@ -98,9 +106,7 @@ function applyGates(row) {
   for (const gate of RULES.gates) {
     const value = row[gate.header] || "";
 
-    if (gate.type === "equals" && value === gate.value) {
-      return gate.reason;
-    }
+    if (gate.type === "equals" && value === gate.value) return gate.reason;
 
     if (gate.type === "min_lines") {
       if (countValidLines(value, gate.min_chars_per_line) < gate.min_lines) {
@@ -110,8 +116,9 @@ function applyGates(row) {
 
     if (gate.type === "contains_all") {
       const norm = normalizeText(value);
-      const ok = gate.value.every(v => norm.includes(normalizeText(v)));
-      if (!ok) return gate.reason;
+      if (!gate.value.every(v => norm.includes(normalizeText(v)))) {
+        return gate.reason;
+      }
     }
   }
 
@@ -126,7 +133,7 @@ function applyGates(row) {
 
 
 // ======================================================
-// SCORING (FASE B COMPLETA)
+// SCORING (FASE B)
 // ======================================================
 
 function applyScoring(row) {
@@ -134,56 +141,75 @@ function applyScoring(row) {
 
   for (const [block, ruleset] of Object.entries(RULES.scoring)) {
 
-    // B3 — CANALES (con cap)
     if (block === "canales") {
       let subtotal = 0;
-
       for (const r of ruleset.rules) {
         const value = row[r.header] || "";
-
-        if (r.type === "min_lines") {
-          if (countValidLines(value, r.min_chars_per_line) >= r.min_lines) {
-            subtotal += r.points;
-          }
+        if (r.type === "min_lines" &&
+            countValidLines(value, r.min_chars_per_line) >= r.min_lines) {
+          subtotal += r.points;
         }
-
         if (r.type === "map") {
           subtotal += r.points_map[value] || 0;
         }
       }
-
       total += Math.min(subtotal, ruleset.cap);
       continue;
     }
 
-    // Bloques simples
     for (const r of ruleset) {
       const value = row[r.header] || "";
-
-      if (r.type === "equals" && value === r.value) {
-        total += r.points;
-      }
-
-      if (r.type === "min_length" && value.length >= r.min_chars) {
-        total += r.points;
-      }
-
+      if (r.type === "equals" && value === r.value) total += r.points;
+      if (r.type === "min_length" && value.length >= r.min_chars) total += r.points;
       if (r.type === "contains_all") {
         const norm = normalizeText(value);
-        if (r.value.every(v => norm.includes(normalizeText(v)))) {
-          total += r.points;
-        }
+        if (r.value.every(v => norm.includes(normalizeText(v)))) total += r.points;
       }
-
       if (r.type === "min_length_with_action") {
-        if (value.length >= r.min_chars && hasActionVerb(value)) {
-          total += r.points;
-        }
+        if (value.length >= r.min_chars && hasActionVerb(value)) total += r.points;
       }
     }
   }
 
   return total;
+}
+
+
+// ======================================================
+// FLAGS (FASE C — NO DECIDEN)
+// ======================================================
+
+const FLAG_FIELDS = [
+  "15/33. Contá brevemente tu experiencia comercial",
+  "21/33. ¿Qué significa cobrar solo por resultados?",
+  "22/33. ¿Qué responderías si alguien pregunta cuánto voy a ganar?",
+  "23/33. ¿Qué cosas NO dirías nunca al presentar este producto?",
+  "27/33. DM de presentación del producto",
+  "28/33. Post corto para redes",
+  "30/33. Acciones concretas primeros 7 días",
+  "31/33. ¿Por qué creés que sos apto?",
+  "33/33. Si en 30 días no generás ventas, ¿cómo lo interpretás?"
+];
+
+function applyFlags(row) {
+  const flags = [];
+
+  for (const h of FLAG_FIELDS) {
+    const v = row[h] || "";
+    if (v.length < 120) flags.push("FLAG_TEXTO_CORTO");
+    if (isGeneric(v)) flags.push("FLAG_TEXTO_GENERICO");
+    if (!hasActionVerb(v)) flags.push("FLAG_SIN_VERBOS");
+    if (/ingres|ganar|rentab|facil|garant/i.test(v)) {
+      flags.push("FLAG_RIESGO_MARKETING");
+    }
+  }
+
+  if (!row["9/33. Email de contacto (confirmación)"]?.includes("@") ||
+      !/(http|@)/.test(row["11/33. Perfil de red social principal"] || "")) {
+    flags.push("FLAG_DATOS_INCONSISTENTES");
+  }
+
+  return [...new Set(flags)];
 }
 
 
@@ -209,6 +235,7 @@ fileInput.addEventListener("change", async () => {
   RULES = await loadJSON("/rules/rules_v1.json");
   BANNED_WORDS = await loadJSON("/rules/banned_words.json");
   ACTION_VERBS = await loadJSON("/rules/action_verbs.json");
+  GENERIC_WORDS = await loadJSON("/rules/generic_words.json");
 
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
@@ -228,17 +255,20 @@ fileInput.addEventListener("change", async () => {
         fila: i + 2,
         score: 0,
         estado: RULES.states.discarded,
-        motivo: gateReason
+        motivo: gateReason,
+        flags: []
       };
     }
 
     const score = applyScoring(obj);
+    const flags = applyFlags(obj);
+
     const estado =
       score >= RULES.thresholds.approve_min ? RULES.states.approved :
       score >= RULES.thresholds.review_min ? RULES.states.review :
       RULES.states.discarded;
 
-    return { fila: i + 2, score, estado };
+    return { fila: i + 2, score, estado, flags };
   });
 
   output.innerHTML = `
