@@ -1,19 +1,15 @@
 // ======================================================
 // PRESELECCIÓN VENDEDORES — MVP
-// Paso 15 + Paso 16 + Paso 17
+// Paso 15 + 16 + 17 + FASE A2
 // - Lee XLSX exportado desde Google Sheets
 // - Valida estructura fija de columnas (LOCKED)
 // - Mapea semánticamente cada fila
-// NO aplica reglas
-// NO calcula score
-// NO descarta perfiles
+// - Ejecuta GATES DUROS (DESCARTADO_AUTO)
+// NO calcula score todavía
 // ======================================================
 
 
 // ===== CONFIGURACIÓN FORMULARIO (LOCKED) =====
-// Estas son las ÚNICAS columnas esperadas.
-// Nunca se agregan más.
-// Eventualmente pueden reducirse.
 
 const EXPECTED_HEADERS = [
   "Marca temporal",
@@ -55,7 +51,6 @@ const EXPECTED_HEADERS = [
 
 
 // ===== CLASIFICACIÓN SEMÁNTICA (POR BLOQUES) =====
-// Índices 0-based sobre el XLSX
 
 const COLUMN_SECTIONS = {
   system: [0, 1],
@@ -71,6 +66,73 @@ const COLUMN_SECTIONS = {
 };
 
 
+// ===== CARGA DE REGLAS =====
+
+let RULES = null;
+
+async function loadRules() {
+  if (RULES) return RULES;
+  const res = await fetch("/rules/rules_v1.json");
+  RULES = await res.json();
+  return RULES;
+}
+
+
+// ===== HELPERS =====
+
+function normalizeText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function countValidLines(text, minChars) {
+  return normalizeText(text)
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l.length >= minChars).length;
+}
+
+
+// ===== EJECUCIÓN DE GATES =====
+
+function applyGates(row, rules) {
+  for (const gate of rules.gates) {
+    const value = row._raw[gate.header] || "";
+
+    if (gate.type === "equals") {
+      if (value === gate.value) {
+        return gate.reason;
+      }
+    }
+
+    if (gate.type === "min_lines") {
+      const validLines = countValidLines(
+        value,
+        gate.min_chars_per_line
+      );
+      if (validLines < gate.min_lines) {
+        return gate.reason;
+      }
+    }
+
+    if (gate.type === "contains_all") {
+      const norm = normalizeText(value);
+      const ok = gate.value.every(v =>
+        norm.includes(normalizeText(v))
+      );
+      if (!ok) {
+        return gate.reason;
+      }
+    }
+  }
+
+  return null; // pasó todos los gates
+}
+
+
 // ===== ELEMENTOS DOM =====
 
 const fileInput = document.getElementById("fileInput");
@@ -83,14 +145,12 @@ fileInput.addEventListener("change", async () => {
   const file = fileInput.files[0];
   if (!file) return;
 
-  // Validación estricta: SOLO XLSX
   if (!file.name.toLowerCase().endsWith(".xlsx")) {
     alert("Archivo inválido. Solo se acepta XLSX exportado desde Google Sheets.");
     fileInput.value = "";
     return;
   }
 
-  // Leer archivo
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
 
@@ -127,7 +187,7 @@ fileInput.addEventListener("change", async () => {
   }
 
 
-  // ===== MAPEO SEMÁNTICO DE FILAS =====
+  // ===== MAPEO SEMÁNTICO =====
 
   const mappedRows = dataRows.map((row, rowIndex) => {
     const entry = {
@@ -162,24 +222,48 @@ fileInput.addEventListener("change", async () => {
   });
 
 
-  // ===== LOGS DE CONTROL =====
+  // ===== FASE A2 — APLICAR GATES =====
 
-  console.log("Columnas detectadas:", headers);
-  console.log("Cantidad de columnas:", headers.length);
-  console.log("Filas detectadas:", mappedRows.length);
-  console.log("Ejemplo fila mapeada:", mappedRows[0]);
+  const rules = await loadRules();
+
+  const evaluatedRows = mappedRows.map(row => {
+    const gateReason = applyGates(row, rules);
+
+    if (gateReason) {
+      return {
+        ...row,
+        estado: rules.states.discarded,
+        score: 0,
+        motivo: gateReason
+      };
+    }
+
+    return {
+      ...row,
+      estado: "PASA_GATES",
+      score: null,
+      motivo: null
+    };
+  });
+
+
+  // ===== RESUMEN =====
+
+  const descartados = evaluatedRows.filter(
+    r => r.estado === rules.states.discarded
+  ).length;
+
+  const pasan = evaluatedRows.length - descartados;
+
+  console.log("Resultado completo:", evaluatedRows);
 
 
   // ===== SALIDA VISUAL =====
 
   output.innerHTML = `
-    <p><strong>Archivo cargado y mapeado correctamente</strong></p>
-    <p>Columnas detectadas: ${headers.length}</p>
-    <p>Filas procesadas: ${mappedRows.length}</p>
-    ${
-      missingHeaders.length > 0
-        ? `<p style="color:#c49b00;">Columnas faltantes: ${missingHeaders.length}</p>`
-        : `<p style="color:#2ecc71;">Estructura completa</p>`
-    }
+    <p><strong>Archivo procesado</strong></p>
+    <p>Total filas: ${evaluatedRows.length}</p>
+    <p>Descartados por gates: ${descartados}</p>
+    <p>Pasan a scoring: ${pasan}</p>
   `;
 });
