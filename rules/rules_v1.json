@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": "v1.0.1",
+    "version": "v1.1.0",
     "input_columns_required": 35,
-    "description": "Reglas oficiales de gates y scoring. Paso 18: solo gates duros."
+    "description": "Reglas oficiales de gates y scoring. FASE A2 (gates) + FASE B (scoring completo)."
   },
 
   "states": {
@@ -25,6 +25,10 @@
     "etica": 10,
     "prueba": 15
   },
+
+  // ======================================================
+  // GATES DUROS (FASE A2)
+  // ======================================================
 
   "gates": [
     {
@@ -90,5 +94,159 @@
     "scope": "all_text_fields",
     "words_source": "banned_words.json",
     "reason": "Gate GBAN: Lenguaje prohibido"
+  },
+
+  // ======================================================
+  // SCORING (FASE B)
+  // ======================================================
+
+  "scoring": {
+
+    // --------------------------------------------------
+    // B1 — FILTROS (25 pts)
+    // --------------------------------------------------
+    "filtros": [
+      {
+        "header": "2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?",
+        "type": "equals",
+        "value": "Sí",
+        "points": 10
+      },
+      {
+        "header": "3/33. ¿Buscás empleo o sueldo?",
+        "type": "equals",
+        "value": "No",
+        "points": 10
+      },
+      {
+        "header": "6/33. ¿Leíste completo el anuncio y la advertencia?",
+        "type": "equals",
+        "value": "Sí",
+        "points": 5
+      }
+    ],
+
+    // --------------------------------------------------
+    // B2 — EXPERIENCIA (15 pts)
+    // --------------------------------------------------
+    "experiencia": [
+      {
+        "header": "12/33. ¿Vendiste productos digitales o educativos antes?",
+        "type": "equals",
+        "value": "Sí",
+        "points": 10
+      },
+      {
+        "header": "15/33. Contá brevemente tu experiencia comercial",
+        "type": "min_length",
+        "min_chars": 150,
+        "points": 5
+      }
+    ],
+
+    // --------------------------------------------------
+    // B3 — CANALES (20 pts, cap)
+    // --------------------------------------------------
+    "canales": {
+      "cap": 20,
+      "rules": [
+        {
+          "header": "18/33. Listá 3 lugares concretos donde podrías difundir",
+          "type": "min_lines",
+          "min_lines": 3,
+          "min_chars_per_line": 8,
+          "points": 10
+        },
+        {
+          "header": "17/33. Tamaño aproximado",
+          "type": "map",
+          "points_map": {
+            "0": 0,
+            "1–500": 0,
+            "501–2.000": 2,
+            "2.001–10.000": 4,
+            "10.001–50.000": 5,
+            "50.000+": 5
+          }
+        },
+        {
+          "header": "19/33. ¿Tenés base de contactos?",
+          "type": "map",
+          "points_map": {
+            "0": 0,
+            "1–50": 0,
+            "51–200": 2,
+            "201–1.000": 4,
+            "1.000+": 5
+          }
+        }
+      ]
+    },
+
+    // --------------------------------------------------
+    // B4 — COMPRENSIÓN (15 pts)
+    // --------------------------------------------------
+    "comprension": [
+      {
+        "header": "21/33. ¿Qué significa cobrar solo por resultados?",
+        "type": "min_length",
+        "min_chars": 120,
+        "points": 5
+      },
+      {
+        "header": "22/33. ¿Qué responderías si alguien pregunta cuánto voy a ganar?",
+        "type": "min_length",
+        "min_chars": 120,
+        "points": 5
+      },
+      {
+        "header": "23/33. ¿Qué cosas NO dirías nunca al presentar este producto?",
+        "type": "min_length",
+        "min_chars": 120,
+        "points": 5
+      }
+    ],
+
+    // --------------------------------------------------
+    // B5 — ÉTICA (10 pts)
+    // --------------------------------------------------
+    "etica": [
+      {
+        "header": "24/33. Aceptación de reglas",
+        "type": "contains_all",
+        "value": [
+          "No promesas",
+          "No marketing agresivo",
+          "No señales",
+          "Producto educativo",
+          "No manipulación"
+        ],
+        "points": 10
+      }
+    ],
+
+    // --------------------------------------------------
+    // B6 — PRUEBA PRÁCTICA (15 pts)
+    // --------------------------------------------------
+    "prueba": [
+      {
+        "header": "27/33. DM de presentación del producto",
+        "type": "min_length_with_action",
+        "min_chars": 120,
+        "points": 5
+      },
+      {
+        "header": "28/33. Post corto para redes",
+        "type": "min_length_with_action",
+        "min_chars": 120,
+        "points": 5
+      },
+      {
+        "header": "30/33. Acciones concretas primeros 7 días",
+        "type": "min_length_with_action",
+        "min_chars": 120,
+        "points": 5
+      }
+    ]
   }
 }
