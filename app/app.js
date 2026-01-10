@@ -7,6 +7,9 @@
 
 // ======================================================
 // CONFIGURACIÓN FORMULARIO (LOCKED)
+// OJO: Google Forms/Sheets a veces mete saltos de línea,
+// doble espacios y textos de ayuda en el HEADER.
+// Por eso NO podemos matchear por string exacto.
 // ======================================================
 
 const EXPECTED_HEADERS = [
@@ -65,6 +68,20 @@ async function loadJSON(path) {
 // HELPERS
 // ======================================================
 
+function canonHeader(h) {
+  // Normaliza espacios + recorta, y toma solo la 1ra línea (Forms mete \n + instrucciones)
+  return String(h ?? "")
+    .split("\n")[0]
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function headerNumber(h) {
+  // Detecta "12/33." etc al principio
+  const m = canonHeader(h).match(/^(\d+)\/33\./);
+  return m ? m[1] : null;
+}
+
 function normalizeText(text) {
   return String(text || "")
     .toLowerCase()
@@ -101,17 +118,49 @@ function isGeneric(text) {
 
 
 // ======================================================
-// VALIDACIÓN HEADERS (bloquea columnas extra)
-// tolera reducción futura (si faltan, OK)
+// MAPEO DE HEADERS (CLAVE DE LA SOLUCIÓN)
+// - Base: "Marca temporal", "Dirección de correo electrónico" por canon()
+// - Preguntas: se matchean por NÚMERO "1/33", "2/33", etc.
+// Así el mismo XLSX de Google Forms SIEMPRE va a entrar.
 // ======================================================
 
-function validateHeaders(fileHeaders) {
-  const extras = fileHeaders.filter(h => !EXPECTED_HEADERS.includes(h));
-  if (extras.length) {
+function buildHeaderMap(fileHeaders) {
+  const byNum = {};
+  const byCanon = {};
+
+  fileHeaders.forEach((fh) => {
+    const ch = canonHeader(fh);
+    byCanon[ch] = fh;
+
+    const num = headerNumber(fh);
+    if (num) byNum[num] = fh;
+  });
+
+  const map = {};
+  for (const eh of EXPECTED_HEADERS) {
+    const num = headerNumber(eh);
+    if (num) {
+      // Matcheo por número
+      map[eh] = byNum[num] || null;
+    } else {
+      // Matcheo por texto canon
+      map[eh] = byCanon[canonHeader(eh)] || null;
+    }
+  }
+
+  return map;
+}
+
+function validateHeaders(fileHeaders, headerMap) {
+  // Ya NO bloqueamos por "extras".
+  // Solo bloqueamos si faltan columnas necesarias para que el scoring tenga sentido.
+  const missing = EXPECTED_HEADERS.filter(eh => !headerMap[eh]);
+
+  if (missing.length) {
     throw new Error(
-      "El XLSX tiene columnas extra NO permitidas:\n\n" +
-      extras.map(x => `- ${x}`).join("\n") +
-      "\n\nSolución: exportá de nuevo desde Google Sheets sin agregar columnas."
+      "El XLSX no trae algunas columnas esperadas (faltantes):\n\n" +
+      missing.map(x => `- ${x}`).join("\n") +
+      "\n\nSolución: exportá de nuevo desde Google Forms/Sheets, sin modificar encabezados."
     );
   }
 }
@@ -256,10 +305,10 @@ fileInput.addEventListener("change", async () => {
     }
 
     // Cargamos reglas y auxiliares
-RULES = await loadJSON("rules/rules_v1.json");
-BANNED_WORDS = await loadJSON("rules/banned_words.json");
-ACTION_VERBS = await loadJSON("rules/action_verbs.json");
-GENERIC_WORDS = await loadJSON("rules/generic_words.json");
+    RULES = await loadJSON("rules/rules_v1.json");
+    BANNED_WORDS = await loadJSON("rules/banned_words.json");
+    ACTION_VERBS = await loadJSON("rules/action_verbs.json");
+    GENERIC_WORDS = await loadJSON("rules/generic_words.json");
 
     // Versionado (opcional pero útil)
     let version = "—";
@@ -274,15 +323,30 @@ GENERIC_WORDS = await loadJSON("rules/generic_words.json");
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-    const headers = rows[0] || [];
+    const fileHeaders = rows[0] || [];
     const dataRows = rows.slice(1);
 
-    validateHeaders(headers);
+    // Mapeo robusto: expected -> real header del XLSX
+    const headerMap = buildHeaderMap(fileHeaders);
+
+    // Validación: SOLO faltantes reales, NO "extras"
+    validateHeaders(fileHeaders, headerMap);
+
+    // Índices rápidos de columnas reales
+    const idxByRealHeader = {};
+    fileHeaders.forEach((h, i) => { idxByRealHeader[h] = i; });
 
     // Resultados por fila
     const results = dataRows.map((row, i) => {
       const obj = {};
-      headers.forEach((h, idx) => obj[h] = row[idx] ?? "");
+
+      // Construimos el objeto con CLAVES "esperadas" (las que usan reglas)
+      // pero leyendo los valores desde el header real del XLSX.
+      for (const eh of EXPECTED_HEADERS) {
+        const realHeader = headerMap[eh];
+        const idx = idxByRealHeader[realHeader];
+        obj[eh] = (idx !== undefined) ? (row[idx] ?? "") : "";
+      }
 
       const gateReason = applyGates(obj);
 
