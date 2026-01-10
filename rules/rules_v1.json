@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "version": "v1.0.0",
+    "input_columns_required": 35
+  },
+
+  "thresholds": {
+    "discard_max": 69,
+    "review_min": 70,
+    "approve_min": 85
+  },
+
+  "states": {
+    "discarded": "DESCARTADO_AUTO",
+    "review": "REVISAR",
+    "approved": "APTO"
+  },
+
+  "weights": {
+    "filtros": 25,
+    "experiencia": 15,
+    "canales": 20,
+    "comprension": 15,
+    "etica": 10,
+    "prueba": 15
+  },
+
+  "gates": [
+    {
+      "id": "G2",
+      "column": "2/33",
+      "type": "equals",
+      "value": "No",
+      "reason": "No acepta comisión"
+    },
+    {
+      "id": "G3",
+      "column": "3/33",
+      "type": "equals",
+      "value": "Sí",
+      "reason": "Busca empleo"
+    },
+    {
+      "id": "G6",
+      "column": "6/33",
+      "type": "equals",
+      "value": "No",
+      "reason": "No leyó advertencia"
+    },
+    {
+      "id": "G7",
+      "column": "7/33",
+      "type": "equals",
+      "value": "No, y no quiero usar Hotmart",
+      "reason": "Rechaza Hotmart"
+    },
+    {
+      "id": "G18",
+      "column": "18/33",
+      "type": "min_lines",
+      "min_lines": 3,
+      "min_chars_per_line": 8,
+      "reason": "Menos de 3 lugares reales"
+    },
+    {
+      "id": "G20",
+      "column": "20/33",
+      "type": "equals",
+      "value": "Ninguna (no tengo límites)",
+      "reason": "Sin límites éticos"
+    },
+    {
+      "id": "G24",
+      "column": "24/33",
+      "type": "contains_all",
+      "value": [
+        "No promesas",
+        "No marketing agresivo",
+        "No señales",
+        "Producto educativo",
+        "No manipulación"
+      ],
+      "reason": "No acepta todas las reglas"
+    }
+  ]
+}
