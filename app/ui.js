@@ -1,125 +1,210 @@
 // ======================================================
-// FASE D — UI (SALIDA)
-// Tabla + Filtros + Detalle
-// Consume window.__RESULTS__ desde app.js
+// UI — FASE D (SALIDA)
+// tabla + filtros + detalle por fila
 // ======================================================
 
-let CURRENT_FILTER = "ALL";
+window.UI = (() => {
+  let currentFilter = "ALL"; // ALL | APTO | REVISAR | DESCARTADO
+  let lastPayload = null;
 
-// ---------- UTILIDADES ----------
-
-function el(id) {
-  return document.getElementById(id);
-}
-
-function badge(text, color) {
-  return `<span style="
-    background:${color};
-    color:#fff;
-    padding:2px 6px;
-    border-radius:4px;
-    font-size:12px;
-    margin-right:4px;
-  ">${text}</span>`;
-}
-
-function estadoBadge(estado) {
-  if (estado === "APTO") return badge("APTO", "#2ecc71");
-  if (estado === "REVISAR") return badge("REVISAR", "#f1c40f");
-  return badge("DESCARTADO", "#e74c3c");
-}
-
-// ---------- RENDER PRINCIPAL ----------
-
-function renderUI(results) {
-  renderFilters();
-  renderTable(results);
-}
-
-function renderFilters() {
-  el("filters").innerHTML = `
-    <button onclick="setFilter('ALL')">Todos</button>
-    <button onclick="setFilter('APTO')">APTO</button>
-    <button onclick="setFilter('REVISAR')">REVISAR</button>
-    <button onclick="setFilter('DESCARTADO_AUTO')">DESCARTADOS</button>
-  `;
-}
-
-function setFilter(filter) {
-  CURRENT_FILTER = filter;
-  renderTable(window.__RESULTS__);
-}
-
-// ---------- TABLA ----------
-
-function renderTable(results) {
-  let rows = results;
-
-  if (CURRENT_FILTER !== "ALL") {
-    rows = results.filter(r => r.estado === CURRENT_FILTER);
+  function escapeHtml(str) {
+    return String(str ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
   }
 
-  let html = `
-    <table border="1" cellpadding="6" cellspacing="0" width="100%">
-      <thead>
-        <tr>
-          <th>Fila</th>
-          <th>Score</th>
-          <th>Estado</th>
-          <th>Motivo</th>
-          <th>Detalle</th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
+  function badgeClass(estado) {
+    if (estado === "APTO") return "ok";
+    if (estado === "REVISAR") return "rev";
+    return "bad";
+  }
 
-  rows.forEach((r, i) => {
-    html += `
-      <tr>
-        <td>${r.fila}</td>
-        <td>${r.score ?? "-"}</td>
-        <td>${estadoBadge(r.estado)}</td>
-        <td>${r.motivo ?? ""}</td>
-        <td>
-          <button onclick="showDetail(${i})">Ver</button>
-        </td>
-      </tr>
+  function setStatus(text) {
+    const el = document.getElementById("statusText");
+    if (el) el.textContent = text;
+  }
+
+  function counts(results) {
+    return {
+      total: results.length,
+      apto: results.filter(r => r.estado === "APTO").length,
+      revisar: results.filter(r => r.estado === "REVISAR").length,
+      descartado: results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO").length
+    };
+  }
+
+  function applyFilter(results) {
+    if (currentFilter === "ALL") return results;
+    if (currentFilter === "APTO") return results.filter(r => r.estado === "APTO");
+    if (currentFilter === "REVISAR") return results.filter(r => r.estado === "REVISAR");
+    return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO");
+  }
+
+  function renderSummary(results, version) {
+    const c = counts(results);
+    const output = document.getElementById("output");
+
+    output.innerHTML = `
+      <div class="row">
+        <div class="pill">Total filas: <strong>${c.total}</strong></div>
+        <div class="pill">APTO: <strong style="color:var(--ok)">${c.apto}</strong></div>
+        <div class="pill">REVISAR: <strong style="color:var(--rev)">${c.revisar}</strong></div>
+        <div class="pill">DESCARTADO: <strong style="color:var(--bad)">${c.descartado}</strong></div>
+        <div class="pill">Versión reglas: <strong>${escapeHtml(version || "—")}</strong></div>
+      </div>
+      <div class="hint">Click en una fila para ver el detalle completo.</div>
     `;
-  });
+  }
 
-  html += "</tbody></table>";
+  function renderFilters(results) {
+    const c = counts(results);
+    const filters = document.getElementById("filters");
 
-  el("resultsTable").innerHTML = html;
-}
+    const mkBtn = (id, label) => {
+      const active = currentFilter === id ? "active" : "";
+      return `<button class="btn ${active}" data-filter="${id}">${label}</button>`;
+    };
 
-// ---------- DETALLE ----------
+    filters.innerHTML = `
+      <div class="row">
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          ${mkBtn("ALL", `Todos (${c.total})`)}
+          ${mkBtn("APTO", `APTO (${c.apto})`)}
+          ${mkBtn("REVISAR", `REVISAR (${c.revisar})`)}
+          ${mkBtn("DESCARTADO", `DESCARTADO (${c.descartado})`)}
+        </div>
 
-function showDetail(index) {
-  const r = window.__RESULTS__[index];
+        <div class="pill">Orden: <strong>Score desc</strong></div>
+      </div>
+    `;
 
-  let html = `
-    <h3>Detalle fila ${r.fila}</h3>
-    <p><strong>Estado:</strong> ${r.estado}</p>
-    <p><strong>Score:</strong> ${r.score}</p>
-    <p><strong>Motivo:</strong> ${r.motivo ?? "-"}</p>
-    <button onclick="closeDetail()">Cerrar</button>
-  `;
+    filters.querySelectorAll("button[data-filter]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        currentFilter = btn.getAttribute("data-filter");
+        renderTable(lastPayload.results);
+        renderFilters(lastPayload.results);
+        hideDetail();
+      });
+    });
+  }
 
-  el("detailPanel").innerHTML = html;
-  el("detailPanel").style.display = "block";
-}
+  function hideDetail() {
+    const panel = document.getElementById("detailPanel");
+    panel.style.display = "none";
+    panel.innerHTML = "";
+  }
 
-function closeDetail() {
-  el("detailPanel").style.display = "none";
-}
+  function showDetail(item) {
+    const panel = document.getElementById("detailPanel");
+    panel.style.display = "block";
 
-// ---------- AUTO INIT ----------
+    const flags = (item.flags || []).length ? item.flags.join(", ") : "—";
 
-document.addEventListener("DOMContentLoaded", () => {
-  const check = setInterval(() => {
-    if (window.__RESULTS__) {
-      clearInterval(check);
-      renderUI(window.__RESULTS__);
+    // mostramos todo el objeto original (rowRaw) para debug + transparencia
+    const rawPretty = JSON.stringify(item.rowRaw || {}, null, 2);
+
+    panel.innerHTML = `
+      <div class="row" style="margin-bottom:10px;">
+        <div class="pill">Fila: <strong>${item.fila}</strong></div>
+        <div class="pill">Score: <strong>${item.score}</strong></div>
+        <div class="pill">Estado: <strong>${escapeHtml(item.estado)}</strong></div>
+        <div class="pill">Motivo: <strong>${escapeHtml(item.motivo || "—")}</strong></div>
+        <div class="pill">Flags: <strong>${escapeHtml(flags)}</strong></div>
+        <button class="btn" id="closeDetail">Cerrar detalle</button>
+      </div>
+
+      <div class="muted" style="margin-bottom:8px;">Contenido completo de la fila (normalizado por headers):</div>
+      <div>${escapeHtml(rawPretty)}</div>
+    `;
+
+    document.getElementById("closeDetail").addEventListener("click", hideDetail);
+  }
+
+  function renderTable(results) {
+    const tableWrap = document.getElementById("resultsTable");
+
+    // orden score desc, y si empatan, por fila asc
+    const sorted = [...results].sort((a, b) => (b.score - a.score) || (a.fila - b.fila));
+    const filtered = applyFilter(sorted);
+
+    if (!filtered.length) {
+      tableWrap.innerHTML = `<div class="muted">No hay filas en este filtro.</div>`;
+      return;
     }
-  }, 300);
-});
+
+    const rowsHtml = filtered.map(r => {
+      const estadoBadge = `<span class="badge ${badgeClass(r.estado)}">${escapeHtml(r.estado)}</span>`;
+      const flagsCount = (r.flags || []).length;
+      const nombre = escapeHtml(r.nombre || "—");
+      const email = escapeHtml(r.email || "—");
+      const motivo = escapeHtml(r.motivo || "—");
+
+      return `
+        <tr data-fila="${r.fila}">
+          <td>${r.fila}</td>
+          <td>${nombre}</td>
+          <td>${email}</td>
+          <td><b>${r.score}</b></td>
+          <td>${estadoBadge}</td>
+          <td>${motivo}</td>
+          <td>${flagsCount ? escapeHtml(String(flagsCount)) : "—"}</td>
+          <td><a href="#" data-open="${r.fila}">Ver</a></td>
+        </tr>
+      `;
+    }).join("");
+
+    tableWrap.innerHTML = `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Fila</th>
+            <th>Nombre</th>
+            <th>Email</th>
+            <th>Score</th>
+            <th>Estado</th>
+            <th>Motivo</th>
+            <th>Flags</th>
+            <th>Detalle</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    `;
+
+    // click en fila o en link "Ver"
+    tableWrap.querySelectorAll("tr[data-fila]").forEach(tr => {
+      tr.addEventListener("click", (e) => {
+        const fila = Number(tr.getAttribute("data-fila"));
+        const item = lastPayload.results.find(x => x.fila === fila);
+        if (item) showDetail(item);
+      });
+    });
+
+    tableWrap.querySelectorAll("a[data-open]").forEach(a => {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const fila = Number(a.getAttribute("data-open"));
+        const item = lastPayload.results.find(x => x.fila === fila);
+        if (item) showDetail(item);
+      });
+    });
+  }
+
+  function renderAll(payload) {
+    lastPayload = payload;
+    setStatus("Procesado ✔");
+
+    renderSummary(payload.results, payload.version);
+    renderFilters(payload.results);
+    renderTable(payload.results);
+    hideDetail();
+  }
+
+  return { renderAll, setStatus };
+})();
