@@ -256,10 +256,10 @@ fileInput.addEventListener("change", async () => {
     }
 
     // Cargamos reglas y auxiliares
-    RULES = await loadJSON("/rules/rules_v1.json");
-    BANNED_WORDS = await loadJSON("/rules/banned_words.json");
-    ACTION_VERBS = await loadJSON("/rules/action_verbs.json");
-    GENERIC_WORDS = await loadJSON("/rules/generic_words.json");
+RULES = await loadJSON("rules/rules_v1.json");
+BANNED_WORDS = await loadJSON("rules/banned_words.json");
+ACTION_VERBS = await loadJSON("rules/action_verbs.json");
+GENERIC_WORDS = await loadJSON("rules/generic_words.json");
 
     // Versionado (opcional pero útil)
     let version = "—";
