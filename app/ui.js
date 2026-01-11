@@ -21,11 +21,16 @@ window.UI = (() => {
       .replaceAll("'", "&#039;");
   }
 
-function badgeClass(estado) {
-  if (estado === "APTO" || estado === "APTO_AUTO") return "ok";
-  if (estado === "REVISAR" || estado === "REVISAR_AUTO") return "rev";
-  return "bad";
-}
+  // PASO 2.3: preferimos estado_final si existe (fallback a estado)
+  function estadoUI(r) {
+    return String(r?.estado_final ?? r?.estado ?? "");
+  }
+
+  function badgeClass(estado) {
+    if (estado === "APTO" || estado === "APTO_AUTO") return "ok";
+    if (estado === "REVISAR" || estado === "REVISAR_AUTO") return "rev";
+    return "bad";
+  }
 
   function setStatus(text) {
     const el = document.getElementById("statusText");
@@ -35,19 +40,42 @@ function badgeClass(estado) {
   function counts(results) {
     return {
       total: results.length,
-apto: results.filter(r => r.estado === "APTO" || r.estado === "APTO_AUTO").length,
-revisar: results.filter(r => r.estado === "REVISAR" || r.estado === "REVISAR_AUTO").length,
-descartado: results.filter(r =>
-  r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO"
-).length
+      apto: results.filter(r => {
+        const e = estadoUI(r);
+        return e === "APTO" || e === "APTO_AUTO";
+      }).length,
+      revisar: results.filter(r => {
+        const e = estadoUI(r);
+        return e === "REVISAR" || e === "REVISAR_AUTO";
+      }).length,
+      descartado: results.filter(r => {
+        const e = estadoUI(r);
+        return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
+      }).length
     };
   }
 
   function applyFilter(results) {
     if (currentFilter === "ALL") return results;
-if (currentFilter === "APTO") return results.filter(r => r.estado === "APTO" || r.estado === "APTO_AUTO");
-if (currentFilter === "REVISAR") return results.filter(r => r.estado === "REVISAR" || r.estado === "REVISAR_AUTO");
-return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO");
+
+    if (currentFilter === "APTO") {
+      return results.filter(r => {
+        const e = estadoUI(r);
+        return e === "APTO" || e === "APTO_AUTO";
+      });
+    }
+
+    if (currentFilter === "REVISAR") {
+      return results.filter(r => {
+        const e = estadoUI(r);
+        return e === "REVISAR" || e === "REVISAR_AUTO";
+      });
+    }
+
+    return results.filter(r => {
+      const e = estadoUI(r);
+      return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
+    });
   }
 
   // -------------------------
@@ -211,12 +239,14 @@ return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCA
     // Row raw (para auditoría)
     const rawPretty = JSON.stringify(item.rowRaw || {}, null, 2);
 
+    const eUI = estadoUI(item);
+
     panel.innerHTML = `
       <div class="row" style="margin-bottom:10px;">
         <div class="pill">Fila: <strong>${item.fila}</strong></div>
         <div class="pill">Score: <strong>${s}/${max}</strong> <span class="kbd">${pct}%</span></div>
         ${progress}
-        <div class="pill">Estado: <strong>${escapeHtml(item.estado)}</strong></div>
+        <div class="pill">Estado: <strong>${escapeHtml(eUI)}</strong></div>
         <div class="pill">Motivo: <strong>${escapeHtml(item.motivo || "—")}</strong></div>
         <div class="pill">Flags: <strong>${escapeHtml(flags)}</strong></div>
         <button class="btn" id="closeDetail">Cerrar detalle</button>
@@ -242,7 +272,12 @@ return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCA
     const tableWrap = document.getElementById("resultsTable");
 
     // orden score desc, y si empatan, por fila asc
-    const sorted = [...results].sort((a, b) => (b.score - a.score) || (a.fila - b.fila));
+    const sorted = [...results].sort((a, b) => {
+      const sa = Number(a.score_total ?? a.score ?? 0);
+      const sb = Number(b.score_total ?? b.score ?? 0);
+      return (sb - sa) || (a.fila - b.fila);
+    });
+
     const filtered = applyFilter(sorted);
 
     if (!filtered.length) {
@@ -251,7 +286,8 @@ return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCA
     }
 
     const rowsHtml = filtered.map(r => {
-      const estadoBadge = `<span class="badge ${badgeClass(r.estado)}">${escapeHtml(r.estado)}</span>`;
+      const eUI = estadoUI(r);
+      const estadoBadge = `<span class="badge ${badgeClass(eUI)}">${escapeHtml(eUI)}</span>`;
       const flagsCount = (r.flags || []).length;
       const nombre = escapeHtml(r.nombre || "—");
       const email = escapeHtml(r.email || "—");
@@ -318,11 +354,15 @@ return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCA
 
   function renderSelected(results) {
     const el = document.getElementById("selectedView");
-const selected = results.filter(r =>
-  r.estado === "APTO" || r.estado === "REVISAR" ||
-  r.estado === "APTO_AUTO" || r.estado === "REVISAR_AUTO"
-)
-      .sort((a, b) => (b.score - a.score) || (a.fila - b.fila));
+
+    const selected = results.filter(r => {
+      const e = estadoUI(r);
+      return e === "APTO" || e === "REVISAR" || e === "APTO_AUTO" || e === "REVISAR_AUTO";
+    }).sort((a, b) => {
+      const sa = Number(a.score_total ?? a.score ?? 0);
+      const sb = Number(b.score_total ?? b.score ?? 0);
+      return (sb - sa) || (a.fila - b.fila);
+    });
 
     if (!selected.length) {
       el.innerHTML = `<div class="muted">No hay seleccionados (APTO/REVISAR) en esta carga.</div>`;
@@ -331,7 +371,8 @@ const selected = results.filter(r =>
 
     const cards = selected.map(r => {
       const { max, s, pct } = scorePercent(r);
-      const estadoBadge = `<span class="badge ${badgeClass(r.estado)}">${escapeHtml(r.estado)}</span>`;
+      const eUI = estadoUI(r);
+      const estadoBadge = `<span class="badge ${badgeClass(eUI)}">${escapeHtml(eUI)}</span>`;
       const flags = (r.flags || []).length ? escapeHtml(r.flags.join(", ")) : "—";
 
       // Checklist mínimo útil para decidir “le escribo o no”
@@ -519,6 +560,8 @@ const selected = results.filter(r =>
 
     for (const r of lastPayload.results) {
       const { max, s, pct } = scorePercent(r);
+      const eUI = estadoUI(r);
+
       const row = [
         r.fila,
         r.nombre || "",
@@ -526,7 +569,7 @@ const selected = results.filter(r =>
         s,
         max,
         pct,
-        r.estado || "",
+        eUI,
         r.motivo || "",
         (r.flags || []).join("|")
       ].map(toCSVCell).join(",");
