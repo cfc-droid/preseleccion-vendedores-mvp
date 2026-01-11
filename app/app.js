@@ -594,6 +594,15 @@ fileInput.addEventListener("change", async () => {
     // Render FASE D (UI)
     UI.renderAll({ results, version, meta });
 
+    // Dataset activo (conserva overrides si es mismo XLSX)
+const ds = loadOrCreateActiveDataset(meta, results, version);
+
+// Enriquecemos para UI con capa humana
+const resultsFinal = enrichResultsWithHuman(ds);
+
+// Render FASE D (UI) usando FINAL
+UI.renderAll({ results: resultsFinal, version, meta });
+
     // Debug
     console.log("RESULTADO FINAL:", results);
 
