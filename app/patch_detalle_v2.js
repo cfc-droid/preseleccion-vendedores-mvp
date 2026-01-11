@@ -1,15 +1,18 @@
 // =====================================================
 // PATCH DETALLE V2 (SIN TOCAR ui.js)
-// - Rehace las 3 partes del detalle con el nivel de detalle del mock
+// - Rehace las 3 partes del detalle con el nivel del mock
 // - Usa SOLO el DOM ya renderizado por ui.js:
 //   * Lee rowRaw (JSON visible al final del detalle)
-//   * Lee listas de correct/incorrect (ULs ya existentes)
+//   * Lee listas CORRECTAS/INCORRECTAS (ULs existentes)
 // - No toca scoring, gates, reglas. Solo PRESENTACIÓN.
 // =====================================================
 
 (() => {
   const DETAIL_ID = "detailPanel";
-  const PATCH_FLAG = "data-patched-v2";
+
+  const PATCH_KEY_ATTR = "data-patched-v2-key"; // clave por fila (NO booleano)
+  const WRAP_ID = "detalleV2_wrap";
+  const STYLE_ID = "detalleV2_style";
 
   // -------------------------
   // Helpers
@@ -29,6 +32,10 @@
     return s.length ? s : "—";
   }
 
+  function norm(s) {
+    return String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
   function canonHeader(h) {
     return String(h ?? "")
       .split("\n")[0]
@@ -46,18 +53,13 @@
     return s.replace(/^\d+\/33\.\s*/, "");
   }
 
-  function pctFixed(n, total) {
+  function pctFixed(_n, total) {
     const v = total > 0 ? (100 / total) : 0;
-    // mantener estilo del mock: 8,33 o 7,69 aprox
     return (Math.round(v * 100) / 100).toFixed(2).replace(".", ",") + "%";
   }
 
-  function norm(s) {
-    return String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-  }
-
   // -------------------------
-  // HEADERS oficiales (igual que EXPECTED_HEADERS)
+  // HEADERS oficiales
   // -------------------------
 
   const EXPECTED_HEADERS = [
@@ -108,25 +110,18 @@
   })();
 
   // -------------------------
-  // Definición de tus 3 partes según el mock
+  // 3 PARTES (mock)
   // -------------------------
 
-  // PARTE 1/3: 12 abiertas prioridad alta
   const Q_ABIERTAS_ALTA = ["Q1","Q9","Q13","Q14","Q15","Q18","Q21","Q22","Q23","Q27","Q30","Q31"];
-
-  // PARTE 2/3: 13 cerradas FIJAS
   const Q_CERRADAS_FIJAS = ["Q2","Q3","Q4","Q5","Q6","Q7","Q12","Q16","Q17","Q19","Q20","Q24","Q25"];
-
-  // PARTE 3/3: 8 abiertas informativas (SIN columna LARGO)
   const Q_INFO = ["Q8","Q10","Q11","Q26","Q28","Q29","Q32","Q33"];
 
   // -------------------------
-  // Extraer rowRaw + correct/incorrect del DOM existente
+  // Extraer rowRaw + listas del DOM
   // -------------------------
 
   function extractRowRaw(panel) {
-    // El JSON se imprime como texto dentro de un <div> al final del detalle.
-    // Buscamos el bloque que empieza con "{" y contiene "Marca temporal"
     const divs = [...panel.querySelectorAll("div")];
     const candidate = divs
       .map(d => d.textContent || "")
@@ -142,7 +137,6 @@
   }
 
   function extractList(panel, titleIncludes) {
-    // En ui.js: listHtml(title, items) -> <div class="miniCard"><div class="sectionTitle">...</div><ul class="list">...</ul>
     const cards = [...panel.querySelectorAll(".miniCard")];
     const card = cards.find(c => (c.querySelector(".sectionTitle")?.textContent || "").includes(titleIncludes));
     if (!card) return [];
@@ -151,7 +145,7 @@
       .filter(Boolean);
   }
 
-  // NUEVO: ocultar los 2 cuadros inútiles (siempre, en cualquier detalle)
+  // Ocultar SIEMPRE los 2 cuadros inútiles
   function hideUselessCorrectIncorrectBoxes(panel) {
     const cards = [...panel.querySelectorAll(".miniCard")];
     for (const c of cards) {
@@ -186,7 +180,39 @@
   }
 
   // -------------------------
-  // Render HTML según el mock
+  // Estilos internos para NO heredar monospace / pre-wrap
+  // -------------------------
+
+  function ensureInnerStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const st = document.createElement("style");
+    st.id = STYLE_ID;
+
+    st.textContent = `
+      /* El panel original usa monospace + pre-wrap. Lo anulamos SOLO dentro del wrap nuevo */
+      #${WRAP_ID}, #${WRAP_ID} *{
+        font-family: var(--font, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial) !important;
+        white-space: normal !important;
+      }
+      #${WRAP_ID} .table{
+        table-layout: fixed;
+        width:100%;
+      }
+      #${WRAP_ID} th, #${WRAP_ID} td{
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      /* Evita que una respuesta larguísima empuje todo */
+      #${WRAP_ID} td:nth-child(3){
+        max-width: 520px;
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // -------------------------
+  // Render (3 partes)
   // -------------------------
 
   function renderParte13(rowRaw, correctList, incorrectList) {
@@ -213,8 +239,6 @@
           ? incHit
           : (estado === "INCORRECTA" ? incHit : "—");
 
-      const opinionIA = estado;
-
       return `
         <tr>
           <td>${idx + 1}</td>
@@ -222,7 +246,7 @@
           <td>${esc(ans)}</td>
           <td>${esc(senales)}</td>
           <td>${esc(eticas)}</td>
-          <td><b>${esc(opinionIA)}</b></td>
+          <td><b>${esc(estado)}</b></td>
           <td>—</td>
           <td>${pct}</td>
         </tr>
@@ -237,12 +261,12 @@
             <thead>
               <tr>
                 <th style="width:60px;">N°</th>
-                <th style="min-width:320px;">12 PREGUNTAS “ABIERTAS” — PRIORIDAD ALTA</th>
-                <th style="min-width:260px;">RESPUESTA DEL VENDEDOR</th>
-                <th style="min-width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
-                <th style="min-width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica) — NO VÁLIDA RESPUESTA</th>
-                <th style="min-width:170px;">OPINIÓN IA (NO decide)</th>
-                <th style="min-width:170px;">OBSERVACIÓN HUMANA</th>
+                <th style="width:320px;">12 PREGUNTAS “ABIERTAS” — PRIORIDAD ALTA</th>
+                <th style="width:360px;">RESPUESTA DEL VENDEDOR</th>
+                <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
+                <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
+                <th style="width:160px;">OPINIÓN IA (NO decide)</th>
+                <th style="width:180px;">OBSERVACIÓN HUMANA</th>
                 <th style="width:110px;">PORCENTAJE</th>
               </tr>
             </thead>
@@ -264,7 +288,6 @@
 
       const estado = inferEstadoPorHeader(header, correctList, incorrectList);
       const just = inferJustificacion(header, correctList, incorrectList);
-
       const puntos = (estado === "CORRECTA") ? pct : (estado === "INCORRECTA" ? "0" : "—");
 
       return { idx, qnum, pregunta, resp, estado, just, puntos };
@@ -319,37 +342,17 @@
         </div>
 
         <div style="margin-top:14px;">
-          <div class="sectionTitle">RESPUESTAS VÁLIDAS — RESUMEN DE LAS CORRECTAS (13 filas fijas)</div>
+          <div class="sectionTitle">RESPUESTAS — DETALLE (13 filas fijas)</div>
           <div style="overflow:auto; margin-top:10px;">
             <table class="table">
               <thead>
                 <tr>
                   <th style="width:60px;">N°</th>
                   <th style="width:80px;">Q</th>
-                  <th style="min-width:280px;">PREGUNTA</th>
+                  <th style="width:280px;">PREGUNTA</th>
                   <th style="width:110px;">PUNTAJE</th>
-                  <th style="min-width:220px;">RESPUESTA DEL VENDEDOR</th>
-                  <th style="min-width:300px;">JUSTIFICACIÓN “CERRADA” — RESPUESTA DE LA IA</th>
-                  <th style="width:120px;">PORCENTAJE</th>
-                </tr>
-              </thead>
-              <tbody>${rowsCerradas()}</tbody>
-            </table>
-          </div>
-        </div>
-
-        <div style="margin-top:14px;">
-          <div class="sectionTitle">RESPUESTAS INCORRECTAS — RESUMEN DE LAS NO VÁLIDAS (13 filas fijas)</div>
-          <div style="overflow:auto; margin-top:10px;">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th style="width:60px;">N°</th>
-                  <th style="width:80px;">Q</th>
-                  <th style="min-width:280px;">PREGUNTA</th>
-                  <th style="width:110px;">PUNTAJE</th>
-                  <th style="min-width:220px;">RESPUESTA DEL VENDEDOR</th>
-                  <th style="min-width:300px;">JUSTIFICACIÓN “CERRADA” — RESPUESTA DE LA IA</th>
+                  <th style="width:240px;">RESPUESTA DEL VENDEDOR</th>
+                  <th style="width:320px;">JUSTIFICACIÓN “CERRADA” — RESPUESTA DE LA IA</th>
                   <th style="width:120px;">PORCENTAJE</th>
                 </tr>
               </thead>
@@ -385,8 +388,8 @@
             <thead>
               <tr>
                 <th style="width:60px;">N°</th>
-                <th style="min-width:360px;">8 PREGUNTAS “ABIERTAS” — PRIORIDAD BAJA</th>
-                <th style="min-width:260px;">RESPUESTA DEL VENDEDOR</th>
+                <th style="width:360px;">8 PREGUNTAS “ABIERTAS” — PRIORIDAD BAJA</th>
+                <th style="width:520px;">RESPUESTA DEL VENDEDOR</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -397,43 +400,69 @@
   }
 
   // -------------------------
-  // Patch principal
+  // Ocultar bloque viejo "PASO 2.4"
+  // (más robusto: no depende solo de .muted)
+  // -------------------------
+
+  function hideOldPaso24(panel) {
+    const candidates = [...panel.querySelectorAll("div, p, span")];
+    const marker = candidates.find(el => norm(el.textContent || "").includes("paso 2.4"));
+    if (!marker) return;
+
+    // A veces el layout viejo viene “pegado” en el siguiente contenedor
+    const next = marker.nextElementSibling;
+    marker.style.display = "none";
+    if (next) next.style.display = "none";
+  }
+
+  // -------------------------
+  // RowKey: para re-patchear al cambiar de fila
+  // -------------------------
+
+  function buildRowKey(rowRaw) {
+    // Robustez: marca temporal + email (si falta algo, igual arma key)
+    const mt = safeVal(rowRaw?.["Marca temporal"]);
+    const em = safeVal(rowRaw?.["Dirección de correo electrónico"]);
+    return `${mt}__${em}`;
+  }
+
+  // -------------------------
+  // Patch principal (re-render por fila)
   // -------------------------
 
   function patch(panel) {
     if (!panel) return;
-    if (panel.getAttribute(PATCH_FLAG) === "1") return;
     if (panel.style.display === "none") return;
 
-    // 1) SIEMPRE ocultar los 2 cuadros inútiles (aunque el patch falle después)
+    ensureInnerStyle();
+
+    // Siempre: ocultar cajas inútiles + ocultar paso viejo
     hideUselessCorrectIncorrectBoxes(panel);
+    hideOldPaso24(panel);
 
     const rowRaw = extractRowRaw(panel);
     if (!rowRaw) return;
 
+    const rowKey = buildRowKey(rowRaw);
+    const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
+
+    // Si ya está renderizado para ESTA fila y el wrap existe, no hagas nada
+    const existingWrap = panel.querySelector(`#${WRAP_ID}`);
+    if (prevKey === rowKey && existingWrap) return;
+
+    // Si cambia la fila: borrar wrap anterior y re-crear
+    if (existingWrap) existingWrap.remove();
+
     const correctList = extractList(panel, "CORRECTAS");
     const incorrectList = extractList(panel, "INCORRECTAS");
 
-    // 2) Ocultamos el bloque viejo de “PASO 2.4 — Detalle por secciones”
-    const muted = [...panel.querySelectorAll(".muted")];
-    const marker = muted.find(x => norm(x.textContent || "").includes("paso 2.4"));
-    if (marker) {
-      const next = marker.nextElementSibling;
-      if (next) next.style.display = "none";
-      marker.style.display = "none";
-    }
-
-    // 3) Insertamos layout nuevo (3 partes) antes del JSON final
+    // Insertar antes del JSON final
     const allDivs = [...panel.querySelectorAll("div")];
     const jsonDiv = allDivs.find(d => (d.textContent || "").trim().startsWith("{") && (d.textContent || "").includes('"Marca temporal"'));
     if (!jsonDiv) return;
 
-    // si ya existe nuestro wrap (por algún re-render raro), lo borramos y lo recreamos
-    const prev = panel.querySelector("#detalleV2_wrap");
-    if (prev) prev.remove();
-
     const wrap = document.createElement("div");
-    wrap.id = "detalleV2_wrap";
+    wrap.id = WRAP_ID;
     wrap.innerHTML = `
       ${renderParte13(rowRaw, correctList, incorrectList)}
       ${renderParte23(rowRaw, correctList, incorrectList)}
@@ -442,7 +471,8 @@
 
     jsonDiv.parentNode.insertBefore(wrap, jsonDiv);
 
-    panel.setAttribute(PATCH_FLAG, "1");
+    // Guardar key de la fila actual
+    panel.setAttribute(PATCH_KEY_ATTR, rowKey);
   }
 
   // -------------------------
@@ -454,15 +484,13 @@
     if (!panel) return;
 
     const obs = new MutationObserver(() => {
-      // aunque ya esté “patcheado”, si ui.js reinyecta esos cuadros, los ocultamos igual
-      hideUselessCorrectIncorrectBoxes(panel);
-
-      // si todavía no se aplicó el layout, aplicarlo
+      // ui.js re-renderiza: re-patchear SIEMPRE según rowKey
       patch(panel);
     });
 
     obs.observe(panel, { childList: true, subtree: true });
 
+    // primer intento
     patch(panel);
   }
 
