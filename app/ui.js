@@ -318,7 +318,10 @@ return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCA
 
   function renderSelected(results) {
     const el = document.getElementById("selectedView");
-    const selected = results.filter(r => r.estado === "APTO" || r.estado === "REVISAR")
+const selected = results.filter(r =>
+  r.estado === "APTO" || r.estado === "REVISAR" ||
+  r.estado === "APTO_AUTO" || r.estado === "REVISAR_AUTO"
+)
       .sort((a, b) => (b.score - a.score) || (a.fila - b.fila));
 
     if (!selected.length) {
