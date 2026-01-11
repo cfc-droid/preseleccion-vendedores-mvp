@@ -411,6 +411,59 @@ const output = document.getElementById("output");
 
 
 // ======================================================
+// PASO 2.3 — Integración capa humana + dataset activo
+// - crea ds = { meta, results, human_overrides }
+// - conserva human_overrides si es el mismo archivo (fingerprint)
+// - enriquece results con: score_auto/score_humano/score_total + estado_final + pendiente_humano
+// ======================================================
+
+function enrichResultsWithHuman(ds) {
+  const hasHuman = (window.HumanPSV && typeof HumanPSV.getOverride === "function");
+  const out = (ds.results || []).map(r => {
+    const rowIndex = r.fila;               // usamos "fila" como row_index (estable y único)
+    const email = r.email || "";
+    const override = hasHuman ? HumanPSV.getOverride(ds, email, rowIndex) : null;
+
+    const sc = hasHuman
+      ? HumanPSV.computeScores(r.score ?? 0, override)
+      : { score_auto: Number(r.score ?? 0), score_humano: 0, score_total: Number(r.score ?? 0) };
+
+    const estadoIA = r.estado_ia || r.estado || "";
+    const estadoFinal = hasHuman ? HumanPSV.computeEstadoFinal(estadoIA, override) : estadoIA;
+    const pendiente = hasHuman ? HumanPSV.isPendienteHumano(override) : false;
+
+    return {
+      ...r,
+      score_auto: sc.score_auto,
+      score_humano: sc.score_humano,
+      score_total: sc.score_total,
+      estado_final: estadoFinal,
+      pendiente_humano: pendiente
+    };
+  });
+
+  return out;
+}
+
+function loadOrCreateActiveDataset(meta, results, versionRules) {
+  const hasStorage = (window.StoragePSV && typeof StoragePSV.loadActiveDataset === "function");
+  if (!hasStorage) return { meta: { ...(meta || {}), versionRules }, results: results || [], human_overrides: {} };
+
+  const prev = StoragePSV.loadActiveDataset();
+  const same = prev && prev.meta && prev.meta.fingerprint && meta && prev.meta.fingerprint === meta.fingerprint;
+
+  const ds = {
+    meta: { ...(meta || {}), versionRules },
+    results: results || [],
+    human_overrides: (same && prev.human_overrides) ? prev.human_overrides : {}
+  };
+
+  StoragePSV.saveActiveDataset(ds);
+  return ds;
+}
+
+
+// ======================================================
 // EVENTO PRINCIPAL
 // ======================================================
 
