@@ -498,35 +498,35 @@ fileInput.addEventListener("change", async () => {
       // Flags (no deciden)
       const flags = applyFlags(obj);
 
-let estado_ia = "DESCARTADO_AUTO";
-let motivo = "";
+      let estado_ia = "DESCARTADO_AUTO";
+      let motivo = "";
 
-if (sc.total >= RULES.thresholds.approve_min) {
-  estado_ia = "APTO_AUTO";
-  motivo = `Score ≥ ${RULES.thresholds.approve_min}`;
-} else if (sc.total >= RULES.thresholds.review_min) {
-  estado_ia = "REVISAR_AUTO";
-  motivo = `Score ${RULES.thresholds.review_min}–${RULES.thresholds.approve_min - 1}`;
-} else {
-  estado_ia = "DESCARTADO_AUTO";
-  motivo = `Score < ${RULES.thresholds.review_min}`;
-}
+      if (sc.total >= RULES.thresholds.approve_min) {
+        estado_ia = "APTO_AUTO";
+        motivo = `Score ≥ ${RULES.thresholds.approve_min}`;
+      } else if (sc.total >= RULES.thresholds.review_min) {
+        estado_ia = "REVISAR_AUTO";
+        motivo = `Score ${RULES.thresholds.review_min}–${RULES.thresholds.approve_min - 1}`;
+      } else {
+        estado_ia = "DESCARTADO_AUTO";
+        motivo = `Score < ${RULES.thresholds.review_min}`;
+      }
 
+      return {
+        fila: i + 2,
+        nombre,
+        email,
+        score: sc.total,
+        maxScore: sc.maxScore,
+        estado: estado_ia,
+        estado_ia,
+        motivo,
+        flags,
+        correct: [...gate.correct, ...sc.correct],
+        incorrect: [...gate.incorrect, ...sc.incorrect],
+        rowRaw: obj
+      };
 
-return {
-  fila: i + 2,
-  nombre,
-  email,
-  score: sc.total,
-  maxScore: sc.maxScore,
-  estado: estado_ia,
-  estado_ia,
-  motivo,
-  flags,
-  correct: [...gate.correct, ...sc.correct],
-  incorrect: [...gate.incorrect, ...sc.incorrect],
-  rowRaw: obj
-};
     });
 
     // Meta para historial
