@@ -45,9 +45,9 @@ descartado: results.filter(r =>
 
   function applyFilter(results) {
     if (currentFilter === "ALL") return results;
-    if (currentFilter === "APTO") return results.filter(r => r.estado === "APTO");
-    if (currentFilter === "REVISAR") return results.filter(r => r.estado === "REVISAR");
-    return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO");
+if (currentFilter === "APTO") return results.filter(r => r.estado === "APTO" || r.estado === "APTO_AUTO");
+if (currentFilter === "REVISAR") return results.filter(r => r.estado === "REVISAR" || r.estado === "REVISAR_AUTO");
+return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO");
   }
 
   // -------------------------
