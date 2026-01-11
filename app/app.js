@@ -498,19 +498,20 @@ fileInput.addEventListener("change", async () => {
       // Flags (no deciden)
       const flags = applyFlags(obj);
 
-      let estado = "DESCARTADO";
-      let motivo = "";
+let estado_ia = "DESCARTADO_AUTO";
+let motivo = "";
 
-      if (sc.total >= RULES.thresholds.approve_min) {
-        estado = "APTO";
-        motivo = `Score ≥ ${RULES.thresholds.approve_min}`;
-      } else if (sc.total >= RULES.thresholds.review_min) {
-        estado = "REVISAR";
-        motivo = `Score ${RULES.thresholds.review_min}–${RULES.thresholds.approve_min - 1}`;
-      } else {
-        estado = "DESCARTADO";
-        motivo = `Score < ${RULES.thresholds.review_min}`;
-      }
+if (sc.total >= RULES.thresholds.approve_min) {
+  estado_ia = "APTO_AUTO";
+  motivo = `Score ≥ ${RULES.thresholds.approve_min}`;
+} else if (sc.total >= RULES.thresholds.review_min) {
+  estado_ia = "REVISAR_AUTO";
+  motivo = `Score ${RULES.thresholds.review_min}–${RULES.thresholds.approve_min - 1}`;
+} else {
+  estado_ia = "DESCARTADO_AUTO";
+  motivo = `Score < ${RULES.thresholds.review_min}`;
+}
+
 
       return {
         fila: i + 2,
