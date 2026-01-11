@@ -46,7 +46,7 @@
     return s.replace(/^\d+\/33\.\s*/, "");
   }
 
-  function pctFixed(_n, total) {
+  function pctFixed(n, total) {
     const v = total > 0 ? (100 / total) : 0;
     // mantener estilo del mock: 8,33 o 7,69 aprox
     return (Math.round(v * 100) / 100).toFixed(2).replace(".", ",") + "%";
@@ -124,8 +124,7 @@
     // El JSON se imprime como texto dentro de un <div> al final del detalle.
     // Buscamos el bloque que empieza con "{" y contiene "Marca temporal"
     const divs = [...panel.querySelectorAll("div")];
-    const candidate = divs.map(d => d.textContent || "")
-      .find(t => t.trim().startsWith("{") && t.includes('"Marca temporal"'));
+    const candidate = divs.map(d => d.textContent || "").find(t => t.trim().startsWith("{") && t.includes('"Marca temporal"'));
     if (!candidate) return null;
 
     try {
@@ -135,23 +134,18 @@
     }
   }
 
-  function findMiniCardByTitle(panel, titleIncludes) {
+  function extractList(panel, titleIncludes) {
+    // En ui.js: listHtml(title, items) -> <div class="miniCard"><div class="sectionTitle">...</div><ul class="list">...</ul>
     const cards = [...panel.querySelectorAll(".miniCard")];
-    return cards.find(c => (c.querySelector(".sectionTitle")?.textContent || "").includes(titleIncludes)) || null;
-  }
-
-  function extractListItemsFromCard(card) {
+    const card = cards.find(c => (c.querySelector(".sectionTitle")?.textContent || "").includes(titleIncludes));
     if (!card) return [];
-    return [...card.querySelectorAll("ul.list li")]
-      .map(li => (li.textContent || "").trim())
-      .filter(Boolean);
+    return [...card.querySelectorAll("ul.list li")].map(li => (li.textContent || "").trim()).filter(Boolean);
   }
 
   function inferEstadoPorHeader(header, correctList, incorrectList) {
     const h = canonHeader(header);
     const ok = correctList.some(x => x.includes(h));
-    const bad = incorrectList.some(x => x.includes(h)) ||
-                incorrectList.some(x => x.includes("FALLA") && x.includes(headerNumber(header) ? `${headerNumber(header)}/33` : ""));
+    const bad = incorrectList.some(x => x.includes(h)) || incorrectList.some(x => x.includes("FALLA") && x.includes(headerNumber(header) ? `${headerNumber(header)}/33` : ""));
     if (bad) return "INCORRECTA";
     if (ok) return "CORRECTA";
     return "—";
@@ -179,23 +173,21 @@
       const pregunta = questionTextFromHeader(header);
       const ans = safeVal(rowRaw?.[header]);
 
+      // Señales automáticas: si en correctList aparece el header => "Respuesta VÁLIDA"
       const estado = inferEstadoPorHeader(header, correctList, incorrectList);
-      const senales =
-        (estado === "CORRECTA")
-          ? "✔ Respuesta VÁLIDA (señales automáticas)"
-          : (estado === "INCORRECTA")
-            ? "✖ Respuesta NO VÁLIDA (señales automáticas)"
-            : "—";
+      const senales = (estado === "CORRECTA")
+        ? "✔ Respuesta VÁLIDA (señales automáticas)"
+        : (estado === "INCORRECTA")
+          ? "✖ Respuesta NO VÁLIDA (señales automáticas)"
+          : "—";
 
+      // Reglas éticas afectadas: buscamos frases típicas en incorrectList
       const incHit = inferJustificacion(header, correctList, incorrectList);
-      const eticas =
-        (String(incHit).toLowerCase().includes("banned") ||
-         String(incHit).toLowerCase().includes("marketing") ||
-         String(incHit).toLowerCase().includes("prohib") ||
-         String(incHit).toLowerCase().includes("gate"))
-          ? incHit
-          : (estado === "INCORRECTA" ? incHit : "—");
+      const eticas = (String(incHit).toLowerCase().includes("banned") || String(incHit).toLowerCase().includes("marketing") || String(incHit).toLowerCase().includes("prohib"))
+        ? incHit
+        : (estado === "INCORRECTA" ? incHit : "—");
 
+      // Opinión IA por pregunta (no decide): CORRECTA/INCORRECTA/—
       const opinionIA = estado;
 
       return `
@@ -239,6 +231,7 @@
   function renderParte23(rowRaw, correctList, incorrectList) {
     const pct = pctFixed(1, 13);
 
+    // Armamos una matriz FIJA de 13 preguntas cerradas
     const items = Q_CERRADAS_FIJAS.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
       const qnum = headerNumber(header) + "/33";
@@ -248,6 +241,8 @@
       const estado = inferEstadoPorHeader(header, correctList, incorrectList);
       const just = inferJustificacion(header, correctList, incorrectList);
 
+      // Puntaje (columna del mock): fijo 7,69%
+      // Si es CORRECTA => “7,69%”, si no => “0” (o “—” si no evaluada)
       const puntos = (estado === "CORRECTA") ? pct : (estado === "INCORRECTA" ? "0" : "—");
 
       return { idx, qnum, pregunta, resp, estado, just, puntos };
@@ -260,9 +255,10 @@
     const pctValid = total ? Math.round((validas / total) * 100) : 0;
     const pctInc = total ? Math.round((incorrectas / total) * 100) : 0;
 
+    // Estado informativo del resumen (no decide): >=70 APTO, 50-69 REVISAR, <50 DESC
     const estadoResumen = (pctValid >= 70) ? "APTO" : (pctValid >= 50) ? "REVISAR" : "DESCARTADO";
 
-    const rowsCerradas = () => items.map(x => `
+    const rowsCerradas = (filterEstado) => items.map(x => `
       <tr>
         <td>${x.idx + 1}</td>
         <td><span class="kbd">${esc(x.qnum)}</span></td>
@@ -274,6 +270,7 @@
       </tr>
     `).join("");
 
+    // Nota: dejamos las 13 filas SIEMPRE (como pedís). El “estado” se ve en la columna.
     return `
       <div class="miniCard" style="margin-top:14px;">
         <div class="sectionTitle">PARTE 2/3 — PREGUNTAS Y RESPUESTAS (CERRADAS) — FIJO (13 preguntas)</div>
@@ -316,7 +313,7 @@
                   <th style="width:120px;">PORCENTAJE</th>
                 </tr>
               </thead>
-              <tbody>${rowsCerradas()}</tbody>
+              <tbody>${rowsCerradas("CORRECTA")}</tbody>
             </table>
           </div>
         </div>
@@ -336,7 +333,7 @@
                   <th style="width:120px;">PORCENTAJE</th>
                 </tr>
               </thead>
-              <tbody>${rowsCerradas()}</tbody>
+              <tbody>${rowsCerradas("INCORRECTA")}</tbody>
             </table>
           </div>
         </div>
@@ -391,21 +388,15 @@
     const rowRaw = extractRowRaw(panel);
     if (!rowRaw) return;
 
-    // 1) EXTRAEMOS las listas desde los 2 cuadros existentes
-    const correctCard = findMiniCardByTitle(panel, "CORRECTAS");
-    const incorrectCard = findMiniCardByTitle(panel, "INCORRECTAS");
-
-    const correctList = extractListItemsFromCard(correctCard);
-    const incorrectList = extractListItemsFromCard(incorrectCard);
-
-    // 2) AHORA SÍ: ocultamos esos 2 cuadros (lo que pediste)
-    if (correctCard) correctCard.style.display = "none";
-    if (incorrectCard) incorrectCard.style.display = "none";
+    const correctList = extractList(panel, "CORRECTAS");
+    const incorrectList = extractList(panel, "INCORRECTAS");
 
     // Ocultamos SOLO el bloque viejo de “PASO 2.4 — Detalle por secciones”
+    // y sus 3 tablas viejas, sin tocar el resto.
     const muted = [...panel.querySelectorAll(".muted")];
     const marker = muted.find(x => (x.textContent || "").includes("PASO 2.4"));
     if (marker) {
+      // El contenedor siguiente suele ser el grid que trae las 3 tablas viejas
       const next = marker.nextElementSibling;
       if (next) next.style.display = "none";
       marker.style.display = "none";
