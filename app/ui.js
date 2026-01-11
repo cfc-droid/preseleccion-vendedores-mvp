@@ -21,11 +21,11 @@ window.UI = (() => {
       .replaceAll("'", "&#039;");
   }
 
-  function badgeClass(estado) {
-    if (estado === "APTO") return "ok";
-    if (estado === "REVISAR") return "rev";
-    return "bad";
-  }
+function badgeClass(estado) {
+  if (estado === "APTO" || estado === "APTO_AUTO") return "ok";
+  if (estado === "REVISAR" || estado === "REVISAR_AUTO") return "rev";
+  return "bad";
+}
 
   function setStatus(text) {
     const el = document.getElementById("statusText");
