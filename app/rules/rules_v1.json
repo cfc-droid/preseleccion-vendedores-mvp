@@ -4,10 +4,10 @@
     "input_columns_required": 35,
     "description": "Reglas oficiales de gates y scoring. FASE A2 (gates) + FASE B (scoring completo)."
   },
-  "states": {
-    "discarded": "DESCARTADO_AUTO",
-    "review": "REVISAR",
-    "approved": "APTO"
+"states": {
+  "discarded": "DESCARTADO_AUTO",
+  "review": "REVISAR_AUTO",
+  "approved": "APTO_AUTO"
   },
   "thresholds": {
     "discard_max": 69,
