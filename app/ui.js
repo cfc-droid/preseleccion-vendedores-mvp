@@ -12,6 +12,154 @@ window.UI = (() => {
   let currentTab = "RESULTADOS"; // RESULTADOS | SELECCIONADOS | HISTORIAL
   const LS_KEY = "cfc_preseleccion_history_v1";
 
+  // ======================================================
+  // PASO 2.4 — Mapeo QID -> Header oficial (desde EXPECTED_HEADERS)
+  // (copiado de app.js para que UI pueda separar secciones en Detalle)
+  // ======================================================
+
+  const EXPECTED_HEADERS_UI = [
+    "Marca temporal",
+    "Dirección de correo electrónico",
+    "1/33. Escribí esta frase y agregá tu @usuario principal + ciudad:",
+    "2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?",
+    "3/33. ¿Buscás empleo o sueldo?",
+    "4/33. Horas semanales reales",
+    "5/33. Conversaciones reales que podés iniciar en 7 días",
+    "6/33. ¿Leíste completo el anuncio y la advertencia?",
+    "7/33. Hotmart",
+    "8/33. Nombre y apellido",
+    "9/33. Email de contacto (confirmación)",
+    "10/33. País / zona horaria",
+    "11/33. Perfil de red social principal",
+    "12/33. ¿Vendiste productos digitales o educativos antes?",
+    "13/33. ¿Qué vendiste?",
+    "14/33. ¿Cómo vendías?",
+    "15/33. Contá brevemente tu experiencia comercial",
+    "16/33. ¿Tenés comunidad propia?",
+    "17/33. Tamaño aproximado",
+    "18/33. Listá 3 lugares concretos donde podrías difundir",
+    "19/33. ¿Tenés base de contactos?",
+    "20/33. ¿Cuál de estas prácticas NO harías nunca?",
+    "21/33. ¿Qué significa cobrar solo por resultados?",
+    "22/33. ¿Qué responderías si alguien pregunta cuánto voy a ganar?",
+    "23/33. ¿Qué cosas NO dirías nunca al presentar este producto?",
+    "24/33. Aceptación de reglas",
+    "25/33. ¿Alguna vez hiciste spam o te reportaron?",
+    "26/33. Explicá qué pasó y qué aprendiste",
+    "27/33. DM de presentación del producto",
+    "28/33. Post corto para redes",
+    "29/33. ¿A qué tipo de cliente apuntarías?",
+    "30/33. Acciones concretas primeros 7 días",
+    "31/33. ¿Por qué creés que sos apto?",
+    "32/33. Comentarios finales",
+    "33/33. Si en 30 días no generás ventas, ¿cómo lo interpretás?"
+  ];
+
+  function canonHeader(h) {
+    return String(h ?? "")
+      .split("\n")[0]
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function headerNumber(h) {
+    const m = canonHeader(h).match(/^(\d+)\/33\./);
+    return m ? m[1] : null;
+  }
+
+  const QID_TO_HEADER = (() => {
+    const m = {};
+    for (const h of EXPECTED_HEADERS_UI) {
+      const num = headerNumber(h);
+      if (num) m[`Q${num}`] = h;
+    }
+    return m;
+  })();
+
+  function questionLabelFromHeader(h) {
+    // "12/33. bla" -> "Q12"
+    const num = headerNumber(h);
+    return num ? `Q${num}` : "";
+  }
+
+  function questionTextFromHeader(h) {
+    // "12/33. Texto" -> "Texto"
+    const s = canonHeader(h);
+    return s.replace(/^\d+\/33\.\s*/, "");
+  }
+
+  function safeVal(v) {
+    const s = String(v ?? "").trim();
+    return s.length ? s : "—";
+  }
+
+  function getQLists() {
+    // Preferimos las listas oficiales desde HumanPSV si existen
+    const hasHuman = (window.HumanPSV && Array.isArray(HumanPSV.Q_ALTA) && Array.isArray(HumanPSV.Q_INFO));
+    const Q_ALTA = hasHuman ? HumanPSV.Q_ALTA : ["Q1","Q9","Q13","Q14","Q15","Q18","Q21","Q22","Q23","Q27","Q30","Q31"];
+    const Q_INFO = hasHuman ? HumanPSV.Q_INFO : ["Q8","Q10","Q11","Q26","Q28","Q29","Q32","Q33"];
+    return { Q_ALTA, Q_INFO };
+  }
+
+  function buildSectionQuestions(item) {
+    const { Q_ALTA, Q_INFO } = getQLists();
+
+    const allQ = [];
+    for (let i = 1; i <= 33; i++) allQ.push(`Q${i}`);
+
+    const setAlta = new Set(Q_ALTA);
+    const setInfo = new Set(Q_INFO);
+
+    const Q_CERRADAS = allQ.filter(q => !setAlta.has(q) && !setInfo.has(q));
+
+    const mkRows = (qids) => {
+      const rr = item.rowRaw || {};
+      return qids.map(qid => {
+        const header = QID_TO_HEADER[qid] || "";
+        const qtext = header ? questionTextFromHeader(header) : qid;
+        const ans = header ? rr[header] : "";
+        return { qid, qtext, ans: safeVal(ans) };
+      });
+    };
+
+    return {
+      alta: mkRows(Q_ALTA),
+      cerradas: mkRows(Q_CERRADAS),
+      info: mkRows(Q_INFO)
+    };
+  }
+
+  function renderQTable(title, rows) {
+    const t = `
+      <div class="miniCard">
+        <div class="sectionTitle">${escapeHtml(title)}</div>
+        <div style="overflow:auto; margin-top:8px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:70px;">Q</th>
+                <th style="min-width:240px;">Pregunta</th>
+                <th style="min-width:260px;">Respuesta</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td><span class="kbd">${escapeHtml(r.qid)}</span></td>
+                  <td>${escapeHtml(r.qtext)}</td>
+                  <td>${escapeHtml(r.ans)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    return t;
+  }
+
+  // ======================================================
+
   function escapeHtml(str) {
     return String(str ?? "")
       .replaceAll("&", "&amp;")
@@ -241,6 +389,9 @@ window.UI = (() => {
 
     const eUI = estadoUI(item);
 
+    // PASO 2.4: separar Q por secciones
+    const sections = buildSectionQuestions(item);
+
     panel.innerHTML = `
       <div class="row" style="margin-bottom:10px;">
         <div class="pill">Fila: <strong>${item.fila}</strong></div>
@@ -255,6 +406,14 @@ window.UI = (() => {
       <div class="grid2">
         ${listHtml("Respuestas/condiciones CORRECTAS", correct)}
         ${listHtml("Respuestas/condiciones INCORRECTAS (por qué)", incorrect)}
+      </div>
+
+      <div style="margin-top:12px;" class="muted">PASO 2.4 — Detalle por secciones (Q ALTA / CERRADAS / INFO):</div>
+
+      <div style="display:grid; gap:12px; margin-top:10px;">
+        ${renderQTable("PARTE 1/3 — Preguntas ABIERTAS (PRIORIDAD ALTA)", sections.alta)}
+        ${renderQTable("PARTE 2/3 — Preguntas CERRADAS", sections.cerradas)}
+        ${renderQTable("PARTE 3/3 — Preguntas ABIERTAS (INFORMATIVAS)", sections.info)}
       </div>
 
       <div style="margin-top:12px;" class="muted">Contenido completo de la fila (normalizado por headers):</div>
