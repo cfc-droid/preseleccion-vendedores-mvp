@@ -159,6 +159,104 @@ window.UI = (() => {
   }
 
   // ======================================================
+  // NUEVO — PARTE 2/3 (CERRADAS) EN FORMATO 3 CUADROS
+  // ======================================================
+
+  function renderClosedSummary(closedEval) {
+    const total = Number(closedEval?.total ?? 13);
+    const ok = Number(closedEval?.ok_count ?? 0);
+    const bad = Number(closedEval?.bad_count ?? Math.max(0, total - ok));
+    const pct = Number(closedEval?.pct_ok ?? 0);
+    const estado = String(closedEval?.estado_detalle_cerradas ?? "—");
+
+    return `
+      <div class="miniCard">
+        <div class="sectionTitle">PARTE 2/3 — RESUMEN (CERRADAS)</div>
+        <div style="overflow:auto; margin-top:8px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Detalle</th>
+                <th style="width:120px;">Unidad</th>
+                <th style="width:140px;">Porcentaje</th>
+                <th style="width:140px;">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>TOTAL DE PREGUNTAS</td>
+                <td>${total}</td>
+                <td>100%</td>
+                <td>—</td>
+              </tr>
+              <tr>
+                <td><b>RESPUESTAS VÁLIDAS</b></td>
+                <td><b>${ok}</b></td>
+                <td><b>${pct}%</b></td>
+                <td><b>${escapeHtml(estado)}</b></td>
+              </tr>
+              <tr>
+                <td>RESPUESTAS INCORRECTAS</td>
+                <td>${bad}</td>
+                <td>${Math.max(0, 100 - pct)}%</td>
+                <td>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="hint" style="margin-top:8px;">
+          Regla (solo informativa para Parte 2/3): ≥70% = APTO, 50–69% = REVISAR, &lt;50% = DESCARTADO.
+        </div>
+      </div>
+    `;
+  }
+
+  function renderClosedTable(title, rows) {
+    if (!rows || !rows.length) {
+      return `
+        <div class="miniCard">
+          <div class="sectionTitle">${escapeHtml(title)}</div>
+          <div class="muted">—</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="miniCard">
+        <div class="sectionTitle">${escapeHtml(title)}</div>
+        <div style="overflow:auto; margin-top:8px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:70px;">N°</th>
+                <th style="min-width:260px;">Pregunta</th>
+                <th style="min-width:220px;">Respuesta del vendedor</th>
+                <th style="min-width:280px;">Justificación (sistema)</th>
+                <th style="width:130px;">Porcentaje</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => {
+                const pct = Number(r.pct_weight ?? 0);
+                const pctTxt = pct ? `${pct.toFixed(3).replace(".", ",")}%` : "—";
+                return `
+                  <tr>
+                    <td>${escapeHtml(r.qid || "—")}</td>
+                    <td>${escapeHtml(r.pregunta || "—")}</td>
+                    <td>${escapeHtml(r.answer || "—")}</td>
+                    <td>${escapeHtml(r.justificacion_ia || "—")}</td>
+                    <td>${escapeHtml(pctTxt)}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  // ======================================================
 
   function escapeHtml(str) {
     return String(str ?? "")
@@ -392,6 +490,25 @@ window.UI = (() => {
     // PASO 2.4: separar Q por secciones
     const sections = buildSectionQuestions(item);
 
+    // ✅ PARTE 2/3 NUEVA (si existe closed_eval)
+    const ce = item.closed_eval && Array.isArray(item.closed_eval.detalle) ? item.closed_eval : null;
+
+    const parte2Html = (() => {
+      if (!ce) {
+        // fallback seguro: lo viejo
+        return renderQTable("PARTE 2/3 — Preguntas CERRADAS", sections.cerradas);
+      }
+
+      const validas = ce.detalle.filter(x => x.is_ok);
+      const invalidas = ce.detalle.filter(x => !x.is_ok);
+
+      return `
+        ${renderClosedSummary(ce)}
+        ${renderClosedTable("RESPUESTAS VÁLIDAS — RESUMEN DE LAS CORRECTAS", validas)}
+        ${renderClosedTable("RESPUESTAS INCORRECTAS — RESUMEN DE LAS NO VÁLIDAS", invalidas)}
+      `;
+    })();
+
     panel.innerHTML = `
       <div class="row" style="margin-bottom:10px;">
         <div class="pill">Fila: <strong>${item.fila}</strong></div>
@@ -412,7 +529,7 @@ window.UI = (() => {
 
       <div style="display:grid; gap:12px; margin-top:10px;">
         ${renderQTable("PARTE 1/3 — Preguntas ABIERTAS (PRIORIDAD ALTA)", sections.alta)}
-        ${renderQTable("PARTE 2/3 — Preguntas CERRADAS", sections.cerradas)}
+        ${parte2Html}
         ${renderQTable("PARTE 3/3 — Preguntas ABIERTAS (INFORMATIVAS)", sections.info)}
       </div>
 
