@@ -101,6 +101,191 @@ window.UI = (() => {
     return { Q_ALTA, Q_INFO };
   }
 
+  // ======================================================
+  // PARTE 2/3 — CERRADAS FIJAS (NO varía cantidad)
+  // 13 cerradas “core” (las que vos estás usando como resumen fijo)
+  // ======================================================
+
+  const Q_CERRADAS_FIXED = ["Q2","Q3","Q4","Q5","Q6","Q7","Q12","Q16","Q17","Q19","Q20","Q24","Q25"];
+
+  // ======================================================
+  // Carga de reglas (SOLO LECTURA desde UI) para evaluar cerradas fijas
+  // ======================================================
+
+  let _RULES_CACHE = null;
+  async function loadRulesOnce() {
+    if (_RULES_CACHE) return _RULES_CACHE;
+    try {
+      const res = await fetch("rules/rules_v1.json");
+      if (!res.ok) throw new Error(`No se pudo cargar rules_v1.json (HTTP ${res.status})`);
+      _RULES_CACHE = await res.json();
+      return _RULES_CACHE;
+    } catch (e) {
+      console.error(e);
+      _RULES_CACHE = null;
+      return null;
+    }
+  }
+
+  function normalizeText(text) {
+    return String(text || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  function evalGateRule(gate, value) {
+    // Devuelve: { ok, why }
+    if (!gate || !gate.type) return { ok: true, why: "—" };
+
+    if (gate.type === "equals") {
+      const ok = String(value ?? "") !== String(gate.value ?? "");
+      return { ok, why: ok ? "Cumple" : (gate.reason || "No cumple") };
+    }
+
+    if (gate.type === "contains_all") {
+      const norm = normalizeText(value);
+      const ok = (gate.value || []).every(v => norm.includes(normalizeText(v)));
+      return { ok, why: ok ? "Aceptó reglas" : (gate.reason || "No acepta todas las reglas") };
+    }
+
+    if (gate.type === "min_lines") {
+      // Cerradas no usan esto normalmente, pero lo soportamos igual.
+      const lines = String(value ?? "").split("\n").map(x => x.trim()).filter(x => x.length >= (gate.min_chars_per_line || 1)).length;
+      const ok = lines >= (gate.min_lines || 0);
+      return { ok, why: ok ? `Líneas válidas: ${lines}` : (gate.reason || "No cumple mínimo") };
+    }
+
+    return { ok: true, why: "—" };
+  }
+
+  function evalScoringRule(r, value) {
+    // Devuelve: { ok, pts, why }
+    if (!r || !r.type) return { ok: true, pts: 0, why: "—" };
+
+    if (r.type === "equals") {
+      const ok = String(value ?? "") === String(r.value ?? "");
+      return { ok, pts: ok ? Number(r.points || 0) : 0, why: ok ? "Cumple" : "No cumple" };
+    }
+
+    if (r.type === "contains_all") {
+      const norm = normalizeText(value);
+      const ok = (r.value || []).every(v => norm.includes(normalizeText(v)));
+      return { ok, pts: ok ? Number(r.points || 0) : 0, why: ok ? "Contiene reglas" : "Faltan reglas" };
+    }
+
+    if (r.type === "map") {
+      const pts = Number((r.points_map && (r.points_map[value] ?? r.points_map[String(value)])) || 0);
+      const ok = pts > 0;
+      return { ok, pts, why: ok ? "Suma puntos" : "0 pts" };
+    }
+
+    // min_length, min_length_with_action son abiertas -> las ignoramos en Parte 2/3 cerradas
+    return { ok: true, pts: 0, why: "—" };
+  }
+
+  function buildFixedClosedRows(item, RULES) {
+    // Siempre devuelve 13 filas (Q_CERRADAS_FIXED)
+    const rr = item.rowRaw || {};
+    const out = [];
+
+    // Index gates por header exacto
+    const gates = Array.isArray(RULES?.gates) ? RULES.gates : [];
+    const gateByHeader = {};
+    for (const g of gates) {
+      if (g && g.header) gateByHeader[g.header] = g;
+    }
+
+    // Index scoring rules por header (solo equals/map/contains_all)
+    const scoring = RULES?.scoring || {};
+    const scoringRulesFlat = [];
+    for (const [block, ruleset] of Object.entries(scoring)) {
+      if (block === "canales" && ruleset && Array.isArray(ruleset.rules)) {
+        for (const r of ruleset.rules) scoringRulesFlat.push({ block, r });
+        continue;
+      }
+      if (Array.isArray(ruleset)) {
+        for (const r of ruleset) scoringRulesFlat.push({ block, r });
+      }
+    }
+
+    const scoringByHeader = {};
+    for (const it of scoringRulesFlat) {
+      const h = it?.r?.header;
+      if (!h) continue;
+      // Si hay repetidos, preferimos el primero (regla “oficial” por header)
+      if (!scoringByHeader[h]) scoringByHeader[h] = it;
+    }
+
+    for (let i = 0; i < Q_CERRADAS_FIXED.length; i++) {
+      const qid = Q_CERRADAS_FIXED[i];
+      const header = QID_TO_HEADER[qid] || "";
+      const qtext = header ? questionTextFromHeader(header) : qid;
+      const ans = header ? rr[header] : "";
+
+      let estado = "—";
+      let why = "—";
+      let pts = "—";
+
+      // 1) Gate si existe (se considera criterio “hard”)
+      const g = header ? gateByHeader[header] : null;
+      if (g) {
+        const evg = evalGateRule(g, ans);
+        estado = evg.ok ? "CORRECTA" : "INCORRECTA";
+        why = evg.why;
+        pts = "Gate";
+      }
+
+      // 2) Scoring si existe (si no hay gate, o además de gate)
+      const sr = header ? scoringByHeader[header] : null;
+      if (sr && sr.r) {
+        const evs = evalScoringRule(sr.r, ans);
+        // Si ya había gate y falló, mantenemos INCORRECTA (hard fail). Si gate ok, usamos scoring.
+        if (estado === "—" || estado === "CORRECTA") {
+          estado = evs.ok ? "CORRECTA" : "INCORRECTA";
+        }
+        // Justificación: preferimos gate si falló; si no, scoring.
+        if (estado === "INCORRECTA" && g && !evalGateRule(g, ans).ok) {
+          // dejar why de gate
+        } else {
+          why = sr.block ? `[${sr.block}] ${evs.why}` : evs.why;
+        }
+        pts = String(evs.pts);
+      }
+
+      // 3) Si no hay ni gate ni scoring para ese Q, igual mostramos fila fija
+      out.push({
+        idx: i + 1,
+        qid,
+        qtext,
+        ans: safeVal(ans),
+        estado,
+        why,
+        pts
+      });
+    }
+
+    return out;
+  }
+
+  function buildClosedSummary(rows) {
+    const total = rows.length;
+    const ok = rows.filter(r => r.estado === "CORRECTA").length;
+    const bad = rows.filter(r => r.estado === "INCORRECTA").length;
+    const pctOk = total > 0 ? Math.round((ok / total) * 100) : 0;
+
+    // Estado informativo (no decide IA)
+    let estadoInfo = "—";
+    if (pctOk >= 70) estadoInfo = "APTO";
+    else if (pctOk >= 50) estadoInfo = "REVISAR";
+    else estadoInfo = "DESCARTADO";
+
+    return { total, ok, bad, pctOk, estadoInfo };
+  }
+
+  // ======================================================
+
   function buildSectionQuestions(item) {
     const { Q_ALTA, Q_INFO } = getQLists();
 
@@ -110,6 +295,7 @@ window.UI = (() => {
     const setAlta = new Set(Q_ALTA);
     const setInfo = new Set(Q_INFO);
 
+    // OJO: Parte 2/3 cerradas FIJAS, así que acá no usamos dynamic.
     const Q_CERRADAS = allQ.filter(q => !setAlta.has(q) && !setInfo.has(q));
 
     const mkRows = (qids) => {
@@ -130,6 +316,7 @@ window.UI = (() => {
   }
 
   function renderQTable(title, rows) {
+    // TABLAS ABIERTAS/INFO: agregamos columnas útiles (Q / Pregunta / Respuesta / Largo)
     const t = `
       <div class="miniCard">
         <div class="sectionTitle">${escapeHtml(title)}</div>
@@ -139,7 +326,8 @@ window.UI = (() => {
               <tr>
                 <th style="width:70px;">Q</th>
                 <th style="min-width:240px;">Pregunta</th>
-                <th style="min-width:260px;">Respuesta</th>
+                <th style="min-width:340px;">Respuesta</th>
+                <th style="width:90px;">Largo</th>
               </tr>
             </thead>
             <tbody>
@@ -148,6 +336,7 @@ window.UI = (() => {
                   <td><span class="kbd">${escapeHtml(r.qid)}</span></td>
                   <td>${escapeHtml(r.qtext)}</td>
                   <td>${escapeHtml(r.ans)}</td>
+                  <td>${String((r.ans && r.ans !== "—") ? String(r.ans).length : 0)}</td>
                 </tr>
               `).join("")}
             </tbody>
@@ -158,102 +347,81 @@ window.UI = (() => {
     return t;
   }
 
-  // ======================================================
-  // NUEVO — PARTE 2/3 (CERRADAS) EN FORMATO 3 CUADROS
-  // ======================================================
-
-  function renderClosedSummary(closedEval) {
-    const total = Number(closedEval?.total ?? 13);
-    const ok = Number(closedEval?.ok_count ?? 0);
-    const bad = Number(closedEval?.bad_count ?? Math.max(0, total - ok));
-    const pct = Number(closedEval?.pct_ok ?? 0);
-    const estado = String(closedEval?.estado_detalle_cerradas ?? "—");
-
-    return `
+  function renderClosedFixedTables(title, rows, summary) {
+    // Parte 2/3: columnas completas y cantidad FIJA
+    const t = `
       <div class="miniCard">
-        <div class="sectionTitle">PARTE 2/3 — RESUMEN (CERRADAS)</div>
-        <div style="overflow:auto; margin-top:8px;">
+        <div class="sectionTitle">${escapeHtml(title)}</div>
+
+        <div style="overflow:auto; margin-top:10px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:60px;">N°</th>
+                <th style="width:70px;">Q</th>
+                <th style="min-width:240px;">Pregunta</th>
+                <th style="min-width:240px;">Respuesta del vendedor</th>
+                <th style="width:130px;">Estado</th>
+                <th style="min-width:240px;">Justificación (sistema)</th>
+                <th style="width:90px;">Puntos</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td>${r.idx}</td>
+                  <td><span class="kbd">${escapeHtml(r.qid)}</span></td>
+                  <td>${escapeHtml(r.qtext)}</td>
+                  <td>${escapeHtml(r.ans)}</td>
+                  <td><b>${escapeHtml(r.estado)}</b></td>
+                  <td>${escapeHtml(r.why)}</td>
+                  <td>${escapeHtml(String(r.pts))}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="margin-top:12px; overflow:auto;">
           <table class="table">
             <thead>
               <tr>
                 <th>Detalle</th>
                 <th style="width:120px;">Unidad</th>
-                <th style="width:140px;">Porcentaje</th>
+                <th style="width:120px;">Porcentaje</th>
                 <th style="width:140px;">Estado</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>TOTAL DE PREGUNTAS</td>
-                <td>${total}</td>
+                <td><b>TOTAL DE PREGUNTAS</b></td>
+                <td>${summary.total}</td>
                 <td>100%</td>
                 <td>—</td>
               </tr>
               <tr>
                 <td><b>RESPUESTAS VÁLIDAS</b></td>
-                <td><b>${ok}</b></td>
-                <td><b>${pct}%</b></td>
-                <td><b>${escapeHtml(estado)}</b></td>
+                <td>${summary.ok}</td>
+                <td>${summary.pctOk}%</td>
+                <td><b>${escapeHtml(summary.estadoInfo)}</b></td>
               </tr>
               <tr>
-                <td>RESPUESTAS INCORRECTAS</td>
-                <td>${bad}</td>
-                <td>${Math.max(0, 100 - pct)}%</td>
+                <td><b>RESPUESTAS INCORRECTAS</b></td>
+                <td>${summary.bad}</td>
+                <td>${summary.total ? (100 - summary.pctOk) : 0}%</td>
                 <td>—</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div class="hint" style="margin-top:8px;">
+
+        <div class="hint" style="margin-top:10px;">
           Regla (solo informativa para Parte 2/3): ≥70% = APTO, 50–69% = REVISAR, &lt;50% = DESCARTADO.
+          (Esta parte NO decide el estado IA; es resumen fijo de cerradas.)
         </div>
       </div>
     `;
-  }
-
-  function renderClosedTable(title, rows) {
-    if (!rows || !rows.length) {
-      return `
-        <div class="miniCard">
-          <div class="sectionTitle">${escapeHtml(title)}</div>
-          <div class="muted">—</div>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="miniCard">
-        <div class="sectionTitle">${escapeHtml(title)}</div>
-        <div style="overflow:auto; margin-top:8px;">
-          <table class="table">
-            <thead>
-              <tr>
-                <th style="width:70px;">N°</th>
-                <th style="min-width:260px;">Pregunta</th>
-                <th style="min-width:220px;">Respuesta del vendedor</th>
-                <th style="min-width:280px;">Justificación (sistema)</th>
-                <th style="width:130px;">Porcentaje</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(r => {
-                const pct = Number(r.pct_weight ?? 0);
-                const pctTxt = pct ? `${pct.toFixed(3).replace(".", ",")}%` : "—";
-                return `
-                  <tr>
-                    <td>${escapeHtml(r.qid || "—")}</td>
-                    <td>${escapeHtml(r.pregunta || "—")}</td>
-                    <td>${escapeHtml(r.answer || "—")}</td>
-                    <td>${escapeHtml(r.justificacion_ia || "—")}</td>
-                    <td>${escapeHtml(pctTxt)}</td>
-                  </tr>
-                `;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
+    return t;
   }
 
   // ======================================================
@@ -429,7 +597,7 @@ window.UI = (() => {
           ${mkBtn("DESCARTADO", `DESCARTADO (${c.descartado})`)}
         </div>
 
-        <div class="pill">Orden: <strong>Score desc</strong></div>
+        <div class="pill">Orden: <strong>Score total desc</strong></div>
       </div>
     `;
 
@@ -453,11 +621,13 @@ window.UI = (() => {
     panel.innerHTML = "";
   }
 
-  function scorePercent(item) {
+  function scoreParts(item) {
     const max = Number(item.maxScore ?? 100);
-    const s = Number(item.score_total ?? item.score ?? 0);
-    const pct = max > 0 ? Math.max(0, Math.min(100, Math.round((s / max) * 100))) : 0;
-    return { max, s, pct };
+    const auto = Number(item.score_auto ?? item.score ?? 0);
+    const hum = Number(item.score_humano ?? 0);
+    const total = Number(item.score_total ?? item.score ?? 0);
+    const pct = max > 0 ? Math.max(0, Math.min(100, Math.round((total / max) * 100))) : 0;
+    return { max, auto, hum, total, pct };
   }
 
   function listHtml(title, items) {
@@ -466,15 +636,15 @@ window.UI = (() => {
     return `<div class="miniCard"><div class="sectionTitle">${escapeHtml(title)}</div><ul class="list">${li}</ul></div>`;
   }
 
-  function showDetail(item) {
+  async function showDetail(item) {
     const panel = document.getElementById("detailPanel");
     panel.style.display = "block";
 
     const flags = (item.flags || []).length ? item.flags.join(", ") : "—";
-    const { max, s, pct } = scorePercent(item);
+    const { max, auto, hum, total, pct } = scoreParts(item);
 
     const progress = `
-      <div class="progressWrap" title="${s}/${max} (${pct}%)">
+      <div class="progressWrap" title="${total}/${max} (${pct}%)">
         <div class="progressBar" style="width:${pct}%;"></div>
       </div>
     `;
@@ -486,34 +656,27 @@ window.UI = (() => {
     const rawPretty = JSON.stringify(item.rowRaw || {}, null, 2);
 
     const eUI = estadoUI(item);
+    const pendiente = item.pendiente_humano ? "SÍ" : "NO";
 
     // PASO 2.4: separar Q por secciones
     const sections = buildSectionQuestions(item);
 
-    // ✅ PARTE 2/3 NUEVA (si existe closed_eval)
-    const ce = item.closed_eval && Array.isArray(item.closed_eval.detalle) ? item.closed_eval : null;
-
-    const parte2Html = (() => {
-      if (!ce) {
-        // fallback seguro: lo viejo
-        return renderQTable("PARTE 2/3 — Preguntas CERRADAS", sections.cerradas);
-      }
-
-      const validas = ce.detalle.filter(x => x.is_ok);
-      const invalidas = ce.detalle.filter(x => !x.is_ok);
-
-      return `
-        ${renderClosedSummary(ce)}
-        ${renderClosedTable("RESPUESTAS VÁLIDAS — RESUMEN DE LAS CORRECTAS", validas)}
-        ${renderClosedTable("RESPUESTAS INCORRECTAS — RESUMEN DE LAS NO VÁLIDAS", invalidas)}
-      `;
-    })();
+    // Parte 2/3 FIX: cerradas fijas + evaluación usando rules_v1.json
+    const RULES = await loadRulesOnce();
+    const fixedClosedRows = buildFixedClosedRows(item, RULES || {});
+    const fixedClosedSummary = buildClosedSummary(fixedClosedRows);
 
     panel.innerHTML = `
       <div class="row" style="margin-bottom:10px;">
         <div class="pill">Fila: <strong>${item.fila}</strong></div>
-        <div class="pill">Score: <strong>${s}/${max}</strong> <span class="kbd">${pct}%</span></div>
+
+        <div class="pill">Auto: <strong>${auto}/${max}</strong></div>
+        <div class="pill">Humano: <strong>${hum}</strong></div>
+        <div class="pill">Total: <strong>${total}/${max}</strong> <span class="kbd">${pct}%</span></div>
         ${progress}
+
+        <div class="pill">Pendiente humano: <strong>${pendiente}</strong></div>
+
         <div class="pill">Estado: <strong>${escapeHtml(eUI)}</strong></div>
         <div class="pill">Motivo: <strong>${escapeHtml(item.motivo || "—")}</strong></div>
         <div class="pill">Flags: <strong>${escapeHtml(flags)}</strong></div>
@@ -525,11 +688,11 @@ window.UI = (() => {
         ${listHtml("Respuestas/condiciones INCORRECTAS (por qué)", incorrect)}
       </div>
 
-      <div style="margin-top:12px;" class="muted">PASO 2.4 — Detalle por secciones (Q ALTA / CERRADAS / INFO):</div>
+      <div style="margin-top:12px;" class="muted">PASO 2.4 — Detalle por secciones:</div>
 
       <div style="display:grid; gap:12px; margin-top:10px;">
         ${renderQTable("PARTE 1/3 — Preguntas ABIERTAS (PRIORIDAD ALTA)", sections.alta)}
-        ${parte2Html}
+        ${renderClosedFixedTables("PARTE 2/3 — RESUMEN (CERRADAS) — FIJO (13 preguntas)", fixedClosedRows, fixedClosedSummary)}
         ${renderQTable("PARTE 3/3 — Preguntas ABIERTAS (INFORMATIVAS)", sections.info)}
       </div>
 
@@ -547,7 +710,7 @@ window.UI = (() => {
   function renderTable(results) {
     const tableWrap = document.getElementById("resultsTable");
 
-    // orden score desc, y si empatan, por fila asc
+    // orden score total desc, y si empatan, por fila asc
     const sorted = [...results].sort((a, b) => {
       const sa = Number(a.score_total ?? a.score ?? 0);
       const sb = Number(b.score_total ?? b.score ?? 0);
@@ -565,17 +728,23 @@ window.UI = (() => {
       const eUI = estadoUI(r);
       const estadoBadge = `<span class="badge ${badgeClass(eUI)}">${escapeHtml(eUI)}</span>`;
       const flagsCount = (r.flags || []).length;
+
       const nombre = escapeHtml(r.nombre || "—");
       const email = escapeHtml(r.email || "—");
       const motivo = escapeHtml(r.motivo || "—");
-      const { max, s, pct } = scorePercent(r);
+
+      const { max, auto, hum, total, pct } = scoreParts(r);
+      const pend = r.pendiente_humano ? "SÍ" : "NO";
 
       return `
         <tr data-fila="${r.fila}">
           <td>${r.fila}</td>
           <td>${nombre}</td>
           <td>${email}</td>
-          <td><b>${s}/${max}</b> <span class="kbd">${pct}%</span></td>
+          <td><b>${auto}</b></td>
+          <td><b>${hum}</b></td>
+          <td><b>${total}/${max}</b> <span class="kbd">${pct}%</span></td>
+          <td>${escapeHtml(pend)}</td>
           <td>${estadoBadge}</td>
           <td>${motivo}</td>
           <td>${flagsCount ? escapeHtml(String(flagsCount)) : "—"}</td>
@@ -591,7 +760,10 @@ window.UI = (() => {
             <th>Fila</th>
             <th>Nombre</th>
             <th>Email</th>
-            <th>Puntaje</th>
+            <th>Auto</th>
+            <th>Hum</th>
+            <th>Total</th>
+            <th>Pend</th>
             <th>Estado</th>
             <th>Motivo</th>
             <th>Flags</th>
@@ -646,10 +818,11 @@ window.UI = (() => {
     }
 
     const cards = selected.map(r => {
-      const { max, s, pct } = scorePercent(r);
+      const { max, auto, hum, total, pct } = scoreParts(r);
       const eUI = estadoUI(r);
       const estadoBadge = `<span class="badge ${badgeClass(eUI)}">${escapeHtml(eUI)}</span>`;
       const flags = (r.flags || []).length ? escapeHtml(r.flags.join(", ")) : "—";
+      const pend = r.pendiente_humano ? "SÍ" : "NO";
 
       // Checklist mínimo útil para decidir “le escribo o no”
       const okEmail = (r.email || "").includes("@");
@@ -659,12 +832,13 @@ window.UI = (() => {
       const checklist = [
         `${okEmail ? "✅" : "❌"} Email válido`,
         `${okSocial ? "✅" : "❌"} Perfil/red social parece válido`,
+        `${pend === "SÍ" ? "⚠️" : "✅"} Pendiente humano: ${pend}`,
         `${(r.correct || []).length ? "✅" : "⚠️"} Cumplimientos detectados`,
         `${(r.incorrect || []).length ? "⚠️" : "✅"} Incumplimientos`
       ];
 
       const progress = `
-        <div class="progressWrap" title="${s}/${max} (${pct}%)">
+        <div class="progressWrap" title="${total}/${max} (${pct}%)">
           <div class="progressBar" style="width:${pct}%;"></div>
         </div>
       `;
@@ -677,7 +851,9 @@ window.UI = (() => {
               <div class="muted">${escapeHtml(r.email || "—")}</div>
             </div>
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
-              <div class="pill">Puntaje: <strong>${s}/${max}</strong> <span class="kbd">${pct}%</span></div>
+              <div class="pill">Auto: <strong>${auto}</strong></div>
+              <div class="pill">Hum: <strong>${hum}</strong></div>
+              <div class="pill">Total: <strong>${total}/${max}</strong> <span class="kbd">${pct}%</span></div>
               ${progress}
               <div>${estadoBadge}</div>
               <button class="btn" data-open="${r.fila}">Ver detalle</button>
@@ -696,7 +872,7 @@ window.UI = (() => {
           </div>
 
           <div style="margin-top:10px;" class="hint">
-            Tip: usá “Ver detalle” para ver correctas/incorrectas y la fila completa.
+            Tip: usá “Ver detalle” para ver Parte 1/2/3 completas + la fila completa.
           </div>
         </div>
       `;
@@ -830,21 +1006,25 @@ window.UI = (() => {
       return;
     }
 
-    const cols = ["fila", "nombre", "email", "score", "maxScore", "percent", "estado", "motivo", "flags"];
+    // CSV con columnas nuevas (Auto/Hum/Total/Pendiente)
+    const cols = ["fila", "nombre", "email", "score_auto", "score_humano", "score_total", "maxScore", "percent", "pendiente_humano", "estado", "motivo", "flags"];
     const lines = [];
     lines.push(cols.join(","));
 
     for (const r of lastPayload.results) {
-      const { max, s, pct } = scorePercent(r);
+      const { max, auto, hum, total, pct } = scoreParts(r);
       const eUI = estadoUI(r);
 
       const row = [
         r.fila,
         r.nombre || "",
         r.email || "",
-        s,
+        auto,
+        hum,
+        total,
         max,
         pct,
+        r.pendiente_humano ? "SI" : "NO",
         eUI,
         r.motivo || "",
         (r.flags || []).join("|")
@@ -902,6 +1082,9 @@ window.UI = (() => {
 
     // mantiene pestaña actual (si estabas en otra, la respeta)
     setTab(currentTab);
+
+    // precarga rules (best effort, no rompe si falla)
+    loadRulesOnce();
   }
 
   // Init botones top
