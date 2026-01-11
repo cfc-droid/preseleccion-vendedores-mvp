@@ -1,11 +1,11 @@
-// ======================================================
+// =====================================================
 // PATCH DETALLE V2 (SIN TOCAR ui.js)
 // - Rehace las 3 partes del detalle con el nivel de detalle del mock
 // - Usa SOLO el DOM ya renderizado por ui.js:
 //   * Lee rowRaw (JSON visible al final del detalle)
 //   * Lee listas de correct/incorrect (ULs ya existentes)
 // - No toca scoring, gates, reglas. Solo PRESENTACIÓN.
-// ======================================================
+// =====================================================
 
 (() => {
   const DETAIL_ID = "detailPanel";
