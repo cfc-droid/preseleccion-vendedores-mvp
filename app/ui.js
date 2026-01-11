@@ -181,7 +181,7 @@ return results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCA
 
   function scorePercent(item) {
     const max = Number(item.maxScore ?? 100);
-    const s = Number(item.score ?? 0);
+    const s = Number(item.score_total ?? item.score ?? 0);
     const pct = max > 0 ? Math.max(0, Math.min(100, Math.round((s / max) * 100))) : 0;
     return { max, s, pct };
   }
