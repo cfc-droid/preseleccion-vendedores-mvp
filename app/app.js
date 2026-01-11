@@ -513,19 +513,20 @@ if (sc.total >= RULES.thresholds.approve_min) {
 }
 
 
-      return {
-        fila: i + 2,
-        nombre,
-        email,
-        score: sc.total,
-        maxScore: sc.maxScore,
-        estado,
-        motivo,
-        flags,
-        correct: [...gate.correct, ...sc.correct],
-        incorrect: [...gate.incorrect, ...sc.incorrect],
-        rowRaw: obj
-      };
+return {
+  fila: i + 2,
+  nombre,
+  email,
+  score: sc.total,
+  maxScore: sc.maxScore,
+  estado: estado_ia,
+  estado_ia,
+  motivo,
+  flags,
+  correct: [...gate.correct, ...sc.correct],
+  incorrect: [...gate.incorrect, ...sc.incorrect],
+  rowRaw: obj
+};
     });
 
     // Meta para historial
