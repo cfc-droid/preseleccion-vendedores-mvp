@@ -613,3 +613,20 @@ UI.renderAll({ results: resultsFinal, version, meta });
     output.innerHTML = `<p style="color:#ef4444;"><b>Error:</b> ${String(err.message || err)}</p>`;
   }
 });
+
+document.addEventListener("DOMContentLoaded", () => {
+  try {
+    if (!window.StoragePSV) return;
+    const ds = StoragePSV.loadActiveDataset();
+    if (!ds || !ds.results) return;
+
+    const resultsFinal = enrichResultsWithHuman(ds);
+    const versionRules = ds.meta?.versionRules || "—";
+
+    UI.renderAll({ results: resultsFinal, version: versionRules, meta: ds.meta || {} });
+    UI.setStatus("Procesado ✔ (dataset)");
+  } catch (e) {
+    console.error(e);
+  }
+});
+
