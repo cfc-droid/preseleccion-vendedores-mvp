@@ -35,9 +35,11 @@ function badgeClass(estado) {
   function counts(results) {
     return {
       total: results.length,
-      apto: results.filter(r => r.estado === "APTO").length,
-      revisar: results.filter(r => r.estado === "REVISAR").length,
-      descartado: results.filter(r => r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO").length
+apto: results.filter(r => r.estado === "APTO" || r.estado === "APTO_AUTO").length,
+revisar: results.filter(r => r.estado === "REVISAR" || r.estado === "REVISAR_AUTO").length,
+descartado: results.filter(r =>
+  r.estado === "DESCARTADO_AUTO" || r.estado === "DESCARTADO"
+).length
     };
   }
 
