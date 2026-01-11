@@ -122,6 +122,98 @@ function safeStr(v) {
 
 
 // ======================================================
+// NUEVO — PARTE 2/3 (CERRADAS) ESTRUCTURADA PARA UI
+// ======================================================
+
+const Q_CERRADAS_HEADERS = [
+  "2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?",
+  "3/33. ¿Buscás empleo o sueldo?",
+  "4/33. Horas semanales reales",
+  "5/33. Conversaciones reales que podés iniciar en 7 días",
+  "6/33. ¿Leíste completo el anuncio y la advertencia?",
+  "7/33. Hotmart",
+  "12/33. ¿Vendiste productos digitales o educativos antes?",
+  "16/33. ¿Tenés comunidad propia?",
+  "17/33. Tamaño aproximado",
+  "19/33. ¿Tenés base de contactos?",
+  "20/33. ¿Cuál de estas prácticas NO harías nunca?",
+  "24/33. Aceptación de reglas",
+  "25/33. ¿Alguna vez hiciste spam o te reportaron?"
+];
+
+function qidFromHeader33(header) {
+  const m = String(header || "").match(/^(\d+)\/33\./);
+  return m ? `Q${m[1]}` : "";
+}
+
+function questionTextFromHeader33(header) {
+  return String(header || "").replace(/^\d+\/33\.\s*/, "").trim();
+}
+
+function closedJustification(header, answer, isOk) {
+  const a = safeStr(answer).trim();
+  if (!a) return "Sin respuesta";
+
+  if (header.startsWith("2/33.")) return isOk ? "Acepta comisión" : "No acepta comisión";
+  if (header.startsWith("3/33.")) return isOk ? "No busca empleo/sueldo" : "Busca empleo/sueldo";
+  if (header.startsWith("6/33.")) return isOk ? "Leyó anuncio/advertencia" : "No leyó anuncio/advertencia";
+  if (header.startsWith("7/33.")) return isOk ? "Acepta Hotmart" : "Rechaza Hotmart";
+  if (header.startsWith("12/33.")) return isOk ? "Tiene experiencia en digitales" : "No tiene experiencia en digitales";
+  if (header.startsWith("24/33.")) return isOk ? "Acepta reglas éticas" : "No acepta todas las reglas";
+  if (header.startsWith("4/33.")) return isOk ? "Horas suficientes" : "Horas insuficientes";
+  if (header.startsWith("5/33.")) return isOk ? "Conversaciones suficientes" : "Conversaciones insuficientes";
+
+  return isOk ? "Cumple" : "No cumple";
+}
+
+function buildClosedEval(rowObj, correctList, incorrectList) {
+  const pctWeight = 100 / 13; // 13 preguntas => 7.692...
+
+  const okSet = new Set();
+  const badSet = new Set();
+
+  for (const h of Q_CERRADAS_HEADERS) {
+    const inCorrect = (correctList || []).some(s => String(s).includes(h));
+    const inIncorrect = (incorrectList || []).some(s => String(s).includes(h));
+    if (inIncorrect) badSet.add(h);
+    else if (inCorrect) okSet.add(h);
+    else badSet.add(h); // seguridad: si no aparece, queda como incorrecta
+  }
+
+  const detalle = Q_CERRADAS_HEADERS.map(h => {
+    const ans = rowObj[h] ?? "";
+    const is_ok = okSet.has(h) && !badSet.has(h);
+    return {
+      qid: qidFromHeader33(h),
+      header: h,
+      pregunta: questionTextFromHeader33(h),
+      answer: safeStr(ans),
+      is_ok,
+      pct_weight: pctWeight,
+      justificacion_ia: closedJustification(h, ans, is_ok)
+    };
+  });
+
+  const ok_count = detalle.filter(d => d.is_ok).length;
+  const bad_count = detalle.length - ok_count;
+  const pct_ok = Math.round((ok_count / detalle.length) * 100);
+
+  let estado_detalle_cerradas = "DESCARTADO";
+  if (pct_ok >= 70) estado_detalle_cerradas = "APTO";
+  else if (pct_ok >= 50) estado_detalle_cerradas = "REVISAR";
+
+  return {
+    total: detalle.length,
+    ok_count,
+    bad_count,
+    pct_ok,
+    estado_detalle_cerradas,
+    detalle
+  };
+}
+
+
+// ======================================================
 // MAPEO DE HEADERS (CLAVE)
 // - Base: "Marca temporal", "Dirección de correo electrónico" por canon()
 // - Preguntas: se matchean por NÚMERO "1/33", "2/33", etc.
@@ -530,6 +622,8 @@ fileInput.addEventListener("change", async () => {
       const gate = applyGatesWithExplain(obj);
 
       if (gate.failed) {
+        const closed_eval = buildClosedEval(obj, gate.correct, gate.incorrect);
+
         return {
           fila: i + 2,
           nombre,
@@ -541,7 +635,8 @@ fileInput.addEventListener("change", async () => {
           flags: [],
           correct: gate.correct,
           incorrect: gate.incorrect,
-          rowRaw: obj
+          rowRaw: obj,
+          closed_eval
         };
       }
 
@@ -565,6 +660,11 @@ fileInput.addEventListener("change", async () => {
         motivo = `Score < ${RULES.thresholds.review_min}`;
       }
 
+      const correctAll = [...gate.correct, ...sc.correct];
+      const incorrectAll = [...gate.incorrect, ...sc.incorrect];
+
+      const closed_eval = buildClosedEval(obj, correctAll, incorrectAll);
+
       return {
         fila: i + 2,
         nombre,
@@ -575,9 +675,10 @@ fileInput.addEventListener("change", async () => {
         estado_ia,
         motivo,
         flags,
-        correct: [...gate.correct, ...sc.correct],
-        incorrect: [...gate.incorrect, ...sc.incorrect],
-        rowRaw: obj
+        correct: correctAll,
+        incorrect: incorrectAll,
+        rowRaw: obj,
+        closed_eval
       };
 
     });
@@ -595,13 +696,13 @@ fileInput.addEventListener("change", async () => {
     UI.renderAll({ results, version, meta });
 
     // Dataset activo (conserva overrides si es mismo XLSX)
-const ds = loadOrCreateActiveDataset(meta, results, version);
+    const ds = loadOrCreateActiveDataset(meta, results, version);
 
-// Enriquecemos para UI con capa humana
-const resultsFinal = enrichResultsWithHuman(ds);
+    // Enriquecemos para UI con capa humana
+    const resultsFinal = enrichResultsWithHuman(ds);
 
-// Render FASE D (UI) usando FINAL
-UI.renderAll({ results: resultsFinal, version, meta });
+    // Render FASE D (UI) usando FINAL
+    UI.renderAll({ results: resultsFinal, version, meta });
 
     // Debug
     console.log("RESULTADO FINAL:", results);
@@ -629,4 +730,3 @@ document.addEventListener("DOMContentLoaded", () => {
     console.error(e);
   }
 });
-
