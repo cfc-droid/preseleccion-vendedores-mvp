@@ -52,6 +52,10 @@
     return (Math.round(v * 100) / 100).toFixed(2).replace(".", ",") + "%";
   }
 
+  function norm(s) {
+    return String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
   // -------------------------
   // HEADERS oficiales (igual que EXPECTED_HEADERS)
   // -------------------------
@@ -124,7 +128,10 @@
     // El JSON se imprime como texto dentro de un <div> al final del detalle.
     // Buscamos el bloque que empieza con "{" y contiene "Marca temporal"
     const divs = [...panel.querySelectorAll("div")];
-    const candidate = divs.map(d => d.textContent || "").find(t => t.trim().startsWith("{") && t.includes('"Marca temporal"'));
+    const candidate = divs
+      .map(d => d.textContent || "")
+      .find(t => t.trim().startsWith("{") && t.includes('"Marca temporal"'));
+
     if (!candidate) return null;
 
     try {
@@ -139,13 +146,31 @@
     const cards = [...panel.querySelectorAll(".miniCard")];
     const card = cards.find(c => (c.querySelector(".sectionTitle")?.textContent || "").includes(titleIncludes));
     if (!card) return [];
-    return [...card.querySelectorAll("ul.list li")].map(li => (li.textContent || "").trim()).filter(Boolean);
+    return [...card.querySelectorAll("ul.list li")]
+      .map(li => (li.textContent || "").trim())
+      .filter(Boolean);
+  }
+
+  // NUEVO: ocultar los 2 cuadros inútiles (siempre, en cualquier detalle)
+  function hideUselessCorrectIncorrectBoxes(panel) {
+    const cards = [...panel.querySelectorAll(".miniCard")];
+    for (const c of cards) {
+      const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
+      if (
+        t.includes("respuestas/condiciones correctas") ||
+        t.includes("respuestas/condiciones incorrectas")
+      ) {
+        c.style.display = "none";
+      }
+    }
   }
 
   function inferEstadoPorHeader(header, correctList, incorrectList) {
     const h = canonHeader(header);
     const ok = correctList.some(x => x.includes(h));
-    const bad = incorrectList.some(x => x.includes(h)) || incorrectList.some(x => x.includes("FALLA") && x.includes(headerNumber(header) ? `${headerNumber(header)}/33` : ""));
+    const bad =
+      incorrectList.some(x => x.includes(h)) ||
+      incorrectList.some(x => x.includes("FALLA") && x.includes(headerNumber(header) ? `${headerNumber(header)}/33` : ""));
     if (bad) return "INCORRECTA";
     if (ok) return "CORRECTA";
     return "—";
@@ -173,7 +198,6 @@
       const pregunta = questionTextFromHeader(header);
       const ans = safeVal(rowRaw?.[header]);
 
-      // Señales automáticas: si en correctList aparece el header => "Respuesta VÁLIDA"
       const estado = inferEstadoPorHeader(header, correctList, incorrectList);
       const senales = (estado === "CORRECTA")
         ? "✔ Respuesta VÁLIDA (señales automáticas)"
@@ -181,13 +205,14 @@
           ? "✖ Respuesta NO VÁLIDA (señales automáticas)"
           : "—";
 
-      // Reglas éticas afectadas: buscamos frases típicas en incorrectList
       const incHit = inferJustificacion(header, correctList, incorrectList);
-      const eticas = (String(incHit).toLowerCase().includes("banned") || String(incHit).toLowerCase().includes("marketing") || String(incHit).toLowerCase().includes("prohib"))
-        ? incHit
-        : (estado === "INCORRECTA" ? incHit : "—");
+      const eticas =
+        (String(incHit).toLowerCase().includes("banned") ||
+         String(incHit).toLowerCase().includes("marketing") ||
+         String(incHit).toLowerCase().includes("prohib"))
+          ? incHit
+          : (estado === "INCORRECTA" ? incHit : "—");
 
-      // Opinión IA por pregunta (no decide): CORRECTA/INCORRECTA/—
       const opinionIA = estado;
 
       return `
@@ -231,7 +256,6 @@
   function renderParte23(rowRaw, correctList, incorrectList) {
     const pct = pctFixed(1, 13);
 
-    // Armamos una matriz FIJA de 13 preguntas cerradas
     const items = Q_CERRADAS_FIJAS.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
       const qnum = headerNumber(header) + "/33";
@@ -241,8 +265,6 @@
       const estado = inferEstadoPorHeader(header, correctList, incorrectList);
       const just = inferJustificacion(header, correctList, incorrectList);
 
-      // Puntaje (columna del mock): fijo 7,69%
-      // Si es CORRECTA => “7,69%”, si no => “0” (o “—” si no evaluada)
       const puntos = (estado === "CORRECTA") ? pct : (estado === "INCORRECTA" ? "0" : "—");
 
       return { idx, qnum, pregunta, resp, estado, just, puntos };
@@ -255,10 +277,9 @@
     const pctValid = total ? Math.round((validas / total) * 100) : 0;
     const pctInc = total ? Math.round((incorrectas / total) * 100) : 0;
 
-    // Estado informativo del resumen (no decide): >=70 APTO, 50-69 REVISAR, <50 DESC
     const estadoResumen = (pctValid >= 70) ? "APTO" : (pctValid >= 50) ? "REVISAR" : "DESCARTADO";
 
-    const rowsCerradas = (filterEstado) => items.map(x => `
+    const rowsCerradas = () => items.map(x => `
       <tr>
         <td>${x.idx + 1}</td>
         <td><span class="kbd">${esc(x.qnum)}</span></td>
@@ -270,7 +291,6 @@
       </tr>
     `).join("");
 
-    // Nota: dejamos las 13 filas SIEMPRE (como pedís). El “estado” se ve en la columna.
     return `
       <div class="miniCard" style="margin-top:14px;">
         <div class="sectionTitle">PARTE 2/3 — PREGUNTAS Y RESPUESTAS (CERRADAS) — FIJO (13 preguntas)</div>
@@ -313,7 +333,7 @@
                   <th style="width:120px;">PORCENTAJE</th>
                 </tr>
               </thead>
-              <tbody>${rowsCerradas("CORRECTA")}</tbody>
+              <tbody>${rowsCerradas()}</tbody>
             </table>
           </div>
         </div>
@@ -333,7 +353,7 @@
                   <th style="width:120px;">PORCENTAJE</th>
                 </tr>
               </thead>
-              <tbody>${rowsCerradas("INCORRECTA")}</tbody>
+              <tbody>${rowsCerradas()}</tbody>
             </table>
           </div>
         </div>
@@ -377,7 +397,7 @@
   }
 
   // -------------------------
-  // Patch principal: oculta el bloque viejo de secciones y agrega el nuevo
+  // Patch principal
   // -------------------------
 
   function patch(panel) {
@@ -385,27 +405,32 @@
     if (panel.getAttribute(PATCH_FLAG) === "1") return;
     if (panel.style.display === "none") return;
 
+    // 1) SIEMPRE ocultar los 2 cuadros inútiles (aunque el patch falle después)
+    hideUselessCorrectIncorrectBoxes(panel);
+
     const rowRaw = extractRowRaw(panel);
     if (!rowRaw) return;
 
     const correctList = extractList(panel, "CORRECTAS");
     const incorrectList = extractList(panel, "INCORRECTAS");
 
-    // Ocultamos SOLO el bloque viejo de “PASO 2.4 — Detalle por secciones”
-    // y sus 3 tablas viejas, sin tocar el resto.
+    // 2) Ocultamos el bloque viejo de “PASO 2.4 — Detalle por secciones”
     const muted = [...panel.querySelectorAll(".muted")];
-    const marker = muted.find(x => (x.textContent || "").includes("PASO 2.4"));
+    const marker = muted.find(x => norm(x.textContent || "").includes("paso 2.4"));
     if (marker) {
-      // El contenedor siguiente suele ser el grid que trae las 3 tablas viejas
       const next = marker.nextElementSibling;
       if (next) next.style.display = "none";
       marker.style.display = "none";
     }
 
-    // Insertamos nuestro nuevo layout (3 partes) antes del JSON final
+    // 3) Insertamos layout nuevo (3 partes) antes del JSON final
     const allDivs = [...panel.querySelectorAll("div")];
     const jsonDiv = allDivs.find(d => (d.textContent || "").trim().startsWith("{") && (d.textContent || "").includes('"Marca temporal"'));
     if (!jsonDiv) return;
+
+    // si ya existe nuestro wrap (por algún re-render raro), lo borramos y lo recreamos
+    const prev = panel.querySelector("#detalleV2_wrap");
+    if (prev) prev.remove();
 
     const wrap = document.createElement("div");
     wrap.id = "detalleV2_wrap";
@@ -428,10 +453,16 @@
     const panel = document.getElementById(DETAIL_ID);
     if (!panel) return;
 
-    const obs = new MutationObserver(() => patch(panel));
+    const obs = new MutationObserver(() => {
+      // aunque ya esté “patcheado”, si ui.js reinyecta esos cuadros, los ocultamos igual
+      hideUselessCorrectIncorrectBoxes(panel);
+
+      // si todavía no se aplicó el layout, aplicarlo
+      patch(panel);
+    });
+
     obs.observe(panel, { childList: true, subtree: true });
 
-    // primer intento (por si ya estaba abierto)
     patch(panel);
   }
 
