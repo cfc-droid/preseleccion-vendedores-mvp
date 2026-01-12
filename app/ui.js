@@ -881,7 +881,10 @@ window.UI = (() => {
         <button class="btn" id="closeDetail">Cerrar detalle</button>
       </div>
 
-<!-- (oculto) cuadros correct/incorrect -->
+<div class="grid2">
+  ${listHtml("Respuestas/condiciones CORRECTAS", correct)}
+  ${listHtml("Respuestas/condiciones INCORRECTAS (por qué)", incorrect)}
+</div>
 
       <div style="margin-top:12px;" class="muted">PASO 2.4 — Detalle por secciones:</div>
 
