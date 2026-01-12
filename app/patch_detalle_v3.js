@@ -1,23 +1,24 @@
 // =====================================================
-// PATCH DETALLE V3 — FINAL ESTABLE (CORREGIDO)
+// PATCH DETALLE V3 — ORDEN + COLUMNAS CORRECTAS (SIN TOCAR UI)
 // =====================================================
 // - NO toca ui.js ni app.js
-// - Remueve cualquier resto del Patch V2 si existe (#detalleV2_wrap)
-// - No oculta tarjetas incorrectas: oculta SOLO la Parte 1/3 vieja
-// - Inserta Parte 1/3 nueva en un punto estable (antes del JSON final)
-// - 3 columnas automáticas (solo si hay respuesta)
-// - 2 columnas humanas editables (obs + porcentaje)
-// - Porcentaje permitido: 0 o 8,33
-// - Guardado localStorage por fila + pregunta
+// - Remueve restos del Patch V2 si existen (#detalleV2_wrap/#detalleV2_style)
+// - Oculta SOLO la PARTE 1/3 vieja (original), NO toca Parte 2/3 ni Parte 3/3
+// - Inserta Parte 1/3 NUEVA antes de la Parte 2/3 (orden correcto: 1/3 -> 2/3 -> 3/3 -> JSON)
+// - Mantiene 8 columnas estilo mock
+// - Humano editable: Observación + Porcentaje (0 o 8.33)
+// - Guardado en localStorage por fila + pregunta
 // =====================================================
 
 (() => {
   const DETAIL_ID = "detailPanel";
+
   const WRAP_ID = "detalleV3_wrap";
   const STYLE_ID = "detalleV3_style";
   const PATCH_KEY = "data-patch-v3-key";
+
   const LS_KEY = "cfc_parte13_humano_v1";
-  const PCT_ALLOWED = "8.33";
+  const PCT_ALLOWED = "8.33"; // permitido: "0" o "8.33"
 
   /* ================= HELPERS ================= */
 
@@ -104,12 +105,13 @@
     if (n) QID_TO_HEADER[`Q${n}`] = h;
   });
 
+  // 12 abiertas prioridad alta
   const Q_ABIERTAS = [
     "Q1","Q9","Q13","Q14","Q15","Q18",
     "Q21","Q22","Q23","Q27","Q30","Q31"
   ];
 
-  /* ================= DOM ================= */
+  /* ================= DOM EXTRACTION ================= */
 
   const extractRowRaw = panel => {
     const divs = [...panel.querySelectorAll("div")];
@@ -121,28 +123,28 @@
     catch { return null; }
   };
 
-  const findJsonDiv = panel => {
-    const divs = [...panel.querySelectorAll("div")];
-    return divs.find(d =>
-      (d.textContent || "").trim().startsWith("{") &&
-      (d.textContent || "").includes('"Marca temporal"')
-    ) || null;
-  };
-
-  // Remueve cualquier resto del patch v2 si existe (evita mezcla/alteraciones)
+  // Remueve restos del patch v2 (evita mezcla)
   const removeV2IfExists = panel => {
     panel.querySelector("#detalleV2_wrap")?.remove();
     panel.querySelector("#detalleV2_style")?.remove();
   };
 
-  // Oculta SOLO la Parte 1/3 vieja (la original), no toca otras miniCards
-  const hideOldParte13 = panel => {
+  // Oculta SOLO la Parte 1/3 vieja (original)
+  const hideOldParte13Only = panel => {
     panel.querySelectorAll(".miniCard").forEach(c => {
       if (c.id === WRAP_ID) return;
       const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
-      // Solo la tarjeta que explícitamente es Parte 1/3
       if (t.startsWith("parte 1/3")) c.style.display = "none";
     });
+  };
+
+  // Encuentra la tarjeta de Parte 2/3 (ancla estable para insertar antes)
+  const findParte23Card = panel => {
+    const cards = [...panel.querySelectorAll(".miniCard")];
+    return cards.find(c => {
+      const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
+      return t.startsWith("parte 2/3");
+    }) || null;
   };
 
   /* ================= STYLES ================= */
@@ -152,6 +154,10 @@
     const s = document.createElement("style");
     s.id = STYLE_ID;
     s.textContent = `
+      #${WRAP_ID}, #${WRAP_ID} *{
+        font-family: var(--font, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial) !important;
+        white-space: normal !important;
+      }
       #${WRAP_ID} textarea,
       #${WRAP_ID} input{
         width:100%;
@@ -161,11 +167,17 @@
         border:1px solid var(--border);
         color:var(--text);
       }
+      #${WRAP_ID} .table{ table-layout: fixed; width:100%; }
+      #${WRAP_ID} th, #${WRAP_ID} td{
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        vertical-align:top;
+      }
     `;
     document.head.appendChild(s);
   };
 
-  /* ================= AUTO EVAL ================= */
+  /* ================= AUTO RULES (OPEN) ================= */
 
   let OPEN_CACHE = null;
   const loadOpen = async () => {
@@ -179,7 +191,7 @@
 
   const evalAuto = (OPEN, qid, answer) => {
     const txt = String(answer ?? "").trim();
-    if (!txt) return { s:"", e:"", o:"" };
+    if (!txt) return { s:"", e:"", o:"" }; // auto columns only if there is answer
 
     let sev = "ok";
     const sig = [];
@@ -187,26 +199,26 @@
     const n = normalizeText(txt);
 
     (OPEN?.defaults?.risk_rules || []).forEach(r => {
-      if (r.pattern && new RegExp(r.pattern,"i").test(n)) {
-        (r.signals||[]).forEach(x=>sig.push(x));
-        (r.ethics||[]).forEach(x=>eth.add(x));
-        if (r.severity==="bad") sev="bad";
-        if (r.severity==="warn" && sev!=="bad") sev="warn";
+      if (r.pattern && new RegExp(r.pattern, "i").test(n)) {
+        (r.signals || []).forEach(x => sig.push(x));
+        (r.ethics || []).forEach(x => eth.add(x));
+        if (r.severity === "bad") sev = "bad";
+        if (r.severity === "warn" && sev !== "bad") sev = "warn";
       }
     });
 
     (OPEN?.questions?.[qid]?.rules || []).forEach(r => {
-      if (r.pattern && new RegExp(r.pattern,"i").test(n)) {
-        (r.signals||[]).forEach(x=>sig.push(x));
-        (r.ethics||[]).forEach(x=>eth.add(x));
-        if (r.severity==="bad") sev="bad";
-        if (r.severity==="warn" && sev!=="bad") sev="warn";
+      if (r.pattern && new RegExp(r.pattern, "i").test(n)) {
+        (r.signals || []).forEach(x => sig.push(x));
+        (r.ethics || []).forEach(x => eth.add(x));
+        if (r.severity === "bad") sev = "bad";
+        if (r.severity === "warn" && sev !== "bad") sev = "warn";
       }
     });
 
     const op =
-      sev==="bad" ? "Riesgo alto." :
-      sev==="warn" ? "Revisar." :
+      sev === "bad" ? "Riesgo alto." :
+      sev === "warn" ? "Revisar." :
       "OK.";
 
     return {
@@ -216,73 +228,94 @@
     };
   };
 
-  /* ================= HUMANO ================= */
+  /* ================= HUMANO (LOCALSTORAGE) ================= */
 
   const loadDB = () => {
-    try { return JSON.parse(localStorage.getItem(LS_KEY)||"{}"); }
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
     catch { return {}; }
   };
   const saveDB = db => localStorage.setItem(LS_KEY, JSON.stringify(db));
 
   const normPct = v => {
-    const s = String(v??"").replace(",",".");
+    const s = String(v ?? "").trim().replace(",", ".");
     return s === PCT_ALLOWED ? PCT_ALLOWED : "0";
   };
 
   /* ================= RENDER ================= */
 
-  const render = async row => {
+  const renderParte13 = async row => {
     const OPEN = await loadOpen();
     const key = buildRowKey(row);
     const db = loadDB();
 
-    const rows = Q_ABIERTAS.map((qid,i)=>{
+    const pctDefault = "0";
+
+    const rows = Q_ABIERTAS.map((qid, idx) => {
       const h = QID_TO_HEADER[qid];
-      const a = row[h];
-      const auto = evalAuto(OPEN,qid,a);
+      const ansRaw = row?.[h];
+      const ansTxt = String(ansRaw ?? "").trim();
+      const auto = evalAuto(OPEN, qid, ansRaw);
+
       const hk = `${key}__${qid}`;
-      const sv = db[hk]||{obs:"",pct:"0"};
+      const sv = db[hk] || { obs: "", pct: pctDefault };
+
+      const qnum = (headerNumber(h) || "") + "/33";
+      const pregunta = questionText(h);
 
       return `
-        <tr data-k="${hk}">
-          <td>${i+1}</td>
-          <td><b>${headerNumber(h)}/33</b> ${esc(questionText(h))}</td>
-          <td>${esc(safe(a))}</td>
+        <tr data-k="${esc(hk)}">
+          <td>${idx + 1}</td>
+          <td><span class="kbd">${esc(qnum)}</span> ${esc(pregunta)}</td>
+          <td>${esc(safe(ansRaw))}</td>
           <td>${esc(auto.s)}</td>
           <td>${esc(auto.e)}</td>
-          <td>${esc(auto.o)}</td>
-          <td><textarea>${esc(sv.obs)}</textarea></td>
-          <td><input type="number" step="8.33" value="${sv.pct}"></td>
-        </tr>`;
+          <td><b>${esc(auto.o)}</b></td>
+          <td><textarea ${ansTxt ? "" : "disabled"}>${esc(sv.obs || "")}</textarea></td>
+          <td><input ${ansTxt ? "" : "disabled"} type="number" step="8.33" value="${esc(sv.pct || pctDefault)}"></td>
+        </tr>
+      `;
     }).join("");
 
     return `
-      <div id="${WRAP_ID}" class="miniCard">
-        <div class="sectionTitle">PARTE 1/3 — ABIERTAS (PRIORIDAD ALTA)</div>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>#</th><th>Pregunta</th><th>Respuesta</th>
-              <th>Señales</th><th>Ética</th><th>Opinión IA</th>
-              <th>Observación</th><th>%</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+      <div id="${WRAP_ID}" class="miniCard" style="margin-top:14px;">
+        <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
+        <div style="overflow:auto; margin-top:10px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:60px;">N°</th>
+                <th style="width:320px;">12 PREGUNTAS “ABIERTAS” — PRIORIDAD ALTA</th>
+                <th style="width:360px;">RESPUESTA DEL VENDEDOR</th>
+                <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
+                <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
+                <th style="width:160px;">OPINIÓN IA (NO decide)</th>
+                <th style="width:180px;">OBSERVACIÓN HUMANA</th>
+                <th style="width:110px;">PORCENTAJE</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
   };
 
   const bindHuman = panel => {
     const db = loadDB();
-    panel.querySelectorAll(`#${WRAP_ID} tr[data-k]`).forEach(tr=>{
-      const k = tr.dataset.k;
+
+    panel.querySelectorAll(`#${WRAP_ID} tr[data-k]`).forEach(tr => {
+      const k = tr.getAttribute("data-k");
       const ta = tr.querySelector("textarea");
       const ip = tr.querySelector("input");
-      const save = ()=>{
-        db[k]={obs:ta.value,pct:normPct(ip.value)};
-        ip.value=db[k].pct;
+
+      if (!ta || !ip) return;
+
+      const save = () => {
+        db[k] = { obs: ta.value, pct: normPct(ip.value) };
+        ip.value = db[k].pct;
         saveDB(db);
       };
+
       ta.oninput = save;
       ip.oninput = save;
       ip.onblur = save;
@@ -292,46 +325,61 @@
   /* ================= PATCH ================= */
 
   const patch = async panel => {
-    if (!panel || panel.style.display==="none") return;
+    if (!panel || panel.style.display === "none") return;
 
     ensureStyle();
 
     // Evitar mezcla con v2
     removeV2IfExists(panel);
 
-    // Ocultar solo Parte 1/3 vieja
-    hideOldParte13(panel);
+    // Ocultar solo la Parte 1/3 vieja
+    hideOldParte13Only(panel);
 
     const row = extractRowRaw(panel);
     if (!row) return;
 
     const key = buildRowKey(row);
-    if (panel.getAttribute(PATCH_KEY)===key && panel.querySelector(`#${WRAP_ID}`)) return;
+
+    // Si ya está parcheado para esta fila y existe el wrap, no rehacer
+    if (panel.getAttribute(PATCH_KEY) === key && panel.querySelector(`#${WRAP_ID}`)) return;
 
     // Remover nuestro wrap anterior
     panel.querySelector(`#${WRAP_ID}`)?.remove();
 
-    const html = await render(row);
-
-    // Insertar SIEMPRE antes del JSON final (estable)
-    const jsonDiv = findJsonDiv(panel);
-    if (!jsonDiv) return;
+    // Render
+    const html = await renderParte13(row);
 
     const tmp = document.createElement("div");
     tmp.innerHTML = html;
+    const node = tmp.firstElementChild;
+    if (!node) return;
 
-    jsonDiv.parentNode.insertBefore(tmp.firstElementChild, jsonDiv);
+    // Insertar ANTES de la Parte 2/3 (orden correcto)
+    const parte23 = findParte23Card(panel);
+    if (parte23 && parte23.parentNode) {
+      parte23.parentNode.insertBefore(node, parte23);
+    } else {
+      // Fallback ultra seguro: si no se encuentra Parte 2/3, insertar antes del JSON
+      const divs = [...panel.querySelectorAll("div")];
+      const jsonDiv = divs.find(d =>
+        (d.textContent || "").trim().startsWith("{") &&
+        (d.textContent || "").includes('"Marca temporal"')
+      );
+      if (!jsonDiv || !jsonDiv.parentNode) return;
+      jsonDiv.parentNode.insertBefore(node, jsonDiv);
+    }
 
-    panel.setAttribute(PATCH_KEY,key);
+    panel.setAttribute(PATCH_KEY, key);
     bindHuman(panel);
   };
 
-  const init = ()=>{
+  const init = () => {
     const p = document.getElementById(DETAIL_ID);
     if (!p) return;
-    new MutationObserver(()=>patch(p)).observe(p,{childList:true,subtree:true});
+
+    new MutationObserver(() => patch(p)).observe(p, { childList: true, subtree: true });
     patch(p);
   };
 
-  document.addEventListener("DOMContentLoaded",init);
+  document.addEventListener("DOMContentLoaded", init);
 })();
