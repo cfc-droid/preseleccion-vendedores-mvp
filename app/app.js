@@ -2,14 +2,16 @@
 // PRESELECCIÓN VENDEDORES — MVP
 // FASE A2 (GATES) + FASE B (SCORING) + FASE C (FLAGS)
 // + FASE D (SALIDA UI) -> ui.js
+//
+// ÍNDICE 12 (PARTE 2/3 A+B):
+// - ESTADO (panel principal) sale SOLO de Parte 2/3 (13 cerradas)
+// - En tabla principal, "Total" debe mostrar ese % (no scoring completo)
+// - En detalle, puntaje/justificación cerrada se usa desde patch_detalle_v2.js
 // ======================================================
 
 
 // ======================================================
 // CONFIGURACIÓN FORMULARIO (LOCKED)
-// OJO: Google Forms/Sheets a veces mete saltos de línea,
-// doble espacios y textos de ayuda en el HEADER.
-// Por eso NO podemos matchear por string exacto.
 // ======================================================
 
 const EXPECTED_HEADERS = [
@@ -69,7 +71,6 @@ async function loadJSON(path) {
 // ======================================================
 
 function canonHeader(h) {
-  // Normaliza espacios + recorta, y toma solo la 1ra línea (Forms mete \n + instrucciones)
   return String(h ?? "")
     .split("\n")[0]
     .replace(/\s+/g, " ")
@@ -77,7 +78,6 @@ function canonHeader(h) {
 }
 
 function headerNumber(h) {
-  // Detecta "12/33." etc al principio
   const m = canonHeader(h).match(/^(\d+)\/33\./);
   return m ? m[1] : null;
 }
@@ -120,19 +120,11 @@ function safeStr(v) {
   return String(v ?? "");
 }
 
-function toPctTxt(n) {
-  // 7.6923 -> "7,69%"
-  const v = Math.round(Number(n) * 100) / 100;
-  return v.toFixed(2).replace(".", ",") + "%";
-}
-
 
 // ======================================================
-// NUEVO — PARTE 2/3 (CERRADAS) ESTRUCTURADA PARA UI
-// (ÍNDICE 12: A y B)
-// - ESTADO (panel principal) debe depender SOLO de estas 13
-// - PUNTAJE: SOLO "0" o "7,69%" (si hay respuesta)
-// - JUSTIFICACIÓN: SOLO empieza con "OK porque ..." o "NO ES VALIDO porque ..."
+// ÍNDICE 12 — PARTE 2/3 (CERRADAS) = 13 preguntas fijas
+// - ESTADO (panel principal) sale SOLO de estas 13 (pct_ok)
+// - Estados permitidos: DESCARTADO_AUTO (<=69) / REVISAR_AUTO (>=70)
 // ======================================================
 
 const Q_CERRADAS_HEADERS = [
@@ -160,13 +152,14 @@ function questionTextFromHeader33(header) {
   return String(header || "").replace(/^\d+\/33\.\s*/, "").trim();
 }
 
+// Gate por header (si existe)
 function getGateByHeader(header) {
   const gates = Array.isArray(RULES?.gates) ? RULES.gates : [];
   return gates.find(g => g && g.header === header) || null;
 }
 
+// Scoring rule por header (si existe)
 function getScoringRuleByHeader(header) {
-  // Busca la primera regla de scoring cuyo header coincida (equals/contains_all/map)
   const scoring = RULES?.scoring || {};
   for (const [block, ruleset] of Object.entries(scoring)) {
     if (block === "canales" && ruleset && Array.isArray(ruleset.rules)) {
@@ -184,19 +177,12 @@ function getScoringRuleByHeader(header) {
   return null;
 }
 
+// Eval SOLO para Parte 2/3 (13 cerradas)
 function evalClosedOk(header, answer) {
-  // Regla de decisión (sin inventar reglas nuevas):
-  // 1) Si existe GATE para ese header y el gate falla -> NO válido
-  // 2) Si existe scoring equals/contains_all/map -> válido si cumple (o suma >0 en map)
-  // 3) Si no hay regla, pero hay respuesta -> válido (mínimo)
-  // 4) Si no hay respuesta -> no decide columnas (quedan vacías), pero para % cuenta como no OK.
-
   const a = safeStr(answer).trim();
-  if (!a) {
-    return { hasAnswer: false, isOk: false, whyCore: "" };
-  }
+  if (!a) return { hasAnswer: false, isOk: false, whyCore: "" };
 
-  // 1) Gate del header (si existe)
+  // 1) Gate del header (si existe): si falla => NO válido
   const g = getGateByHeader(header);
   if (g) {
     const r = evalGate(g, a);
@@ -205,7 +191,7 @@ function evalClosedOk(header, answer) {
     }
   }
 
-  // 2) Scoring rule (si existe)
+  // 2) Scoring rule (si existe): equals / contains_all / map
   const sr = getScoringRuleByHeader(header);
   if (sr && sr.r) {
     const r = sr.r;
@@ -240,31 +226,17 @@ function evalClosedOk(header, answer) {
     }
   }
 
-  // 3) Sin reglas: si hay respuesta, lo consideramos válido mínimo
+  // 3) Si no hay regla para ese header: si hay respuesta, la tomamos como válida mínima
   return { hasAnswer: true, isOk: true, whyCore: "hay respuesta" };
 }
 
-function closedJustificationStrict(header, answer, isOk, whyCore) {
-  // IMPORTANTE: formato obligatorio
-  const a = safeStr(answer).trim();
-  if (!a) return "";
-
-  if (isOk) return `OK porque ${whyCore || "cumple la condición"}.`;
-  return `NO ES VALIDO porque ${whyCore || "no cumple la condición"}.`;
-}
-
+// Armado de closed_eval (datos “fuente” para patch)
 function buildClosedEval(rowObj) {
   const pctWeight = 100 / 13; // 7.6923...
 
   const detalle = Q_CERRADAS_HEADERS.map(h => {
     const ans = rowObj[h] ?? "";
     const ev = evalClosedOk(h, ans);
-
-    const just = closedJustificationStrict(h, ans, ev.isOk, ev.whyCore);
-
-    // columnas: solo si hay respuesta
-    const puntaje = ev.hasAnswer ? (ev.isOk ? toPctTxt(pctWeight) : "0") : "";
-    const justificacion_ia = ev.hasAnswer ? just : "";
 
     return {
       qid: qidFromHeader33(h),
@@ -273,31 +245,24 @@ function buildClosedEval(rowObj) {
       answer: safeStr(ans),
       is_ok: ev.isOk,
       pct_weight: pctWeight,
-      puntaje,                 // "7,69%" o "0" o ""
-      justificacion_ia         // empieza con OK porque / NO ES VALIDO porque / o ""
+      // NOTA: puntaje/justificación se imprimen en UI por patch_detalle_v2.js (no acá)
+      // para no tocar ui.js
+      puntaje: "",           // reservado
+      justificacion_ia: ""   // reservado
     };
   });
 
   const total = detalle.length; // 13
   const ok_count = detalle.filter(d => d.is_ok).length;
   const bad_count = total - ok_count;
-
   const pct_ok = Math.round((ok_count / total) * 100);
 
-  return {
-    total,
-    ok_count,
-    bad_count,
-    pct_ok,
-    detalle
-  };
+  return { total, ok_count, bad_count, pct_ok, detalle };
 }
 
 
 // ======================================================
 // MAPEO DE HEADERS (CLAVE)
-// - Base: "Marca temporal", "Dirección de correo electrónico" por canon()
-// - Preguntas: se matchean por NÚMERO "1/33", "2/33", etc.
 // ======================================================
 
 function buildHeaderMap(fileHeaders) {
@@ -315,11 +280,8 @@ function buildHeaderMap(fileHeaders) {
   const map = {};
   for (const eh of EXPECTED_HEADERS) {
     const num = headerNumber(eh);
-    if (num) {
-      map[eh] = byNum[num] || null;
-    } else {
-      map[eh] = byCanon[canonHeader(eh)] || null;
-    }
+    if (num) map[eh] = byNum[num] || null;
+    else map[eh] = byCanon[canonHeader(eh)] || null;
   }
 
   return map;
@@ -338,12 +300,12 @@ function validateHeaders(fileHeaders, headerMap) {
 
 
 // ======================================================
-// GATES (FASE A2) + CORRECT/INCORRECT
+// GATES (FASE A2) + CORRECT/INCORRECT (DEBUG)
 // ======================================================
 
 function evalGate(gate, value) {
   if (gate.type === "equals") {
-    const ok = value !== gate.value; // si es igual al valor bloqueante => falla
+    const ok = value !== gate.value;
     return { ok, why: ok ? `OK: ${gate.header}` : `FALLA ${gate.id}: ${gate.reason}` };
   }
 
@@ -369,7 +331,6 @@ function evalGate(gate, value) {
     };
   }
 
-  // desconocido: no bloquea
   return { ok: true, why: `OK: ${gate.header}` };
 }
 
@@ -387,12 +348,7 @@ function applyGatesWithExplain(row) {
     }
 
     incorrect.push(r.why);
-    return {
-      failed: true,
-      reason: gate.reason,
-      correct,
-      incorrect
-    };
+    return { failed: true, reason: gate.reason, correct, incorrect };
   }
 
   // banned gate (GBAN)
@@ -404,12 +360,7 @@ function applyGatesWithExplain(row) {
 
     if (found) {
       incorrect.push(`${RULES.banned_words_gate.reason} (detectado en texto)`);
-      return {
-        failed: true,
-        reason: RULES.banned_words_gate.reason,
-        correct,
-        incorrect
-      };
+      return { failed: true, reason: RULES.banned_words_gate.reason, correct, incorrect };
     } else {
       correct.push("OK: sin palabras prohibidas (banned_words)");
     }
@@ -420,15 +371,13 @@ function applyGatesWithExplain(row) {
 
 
 // ======================================================
-// SCORING (FASE B) + CORRECT/INCORRECT
+// SCORING (FASE B) + CORRECT/INCORRECT (DEBUG)
 // ======================================================
 
 function applyScoringWithExplain(row) {
   let total = 0;
   const correct = [];
   const incorrect = [];
-
-  // Max score: asumimos 100 por diseño, pero lo guardamos explícito
   const maxScore = 100;
 
   for (const [block, ruleset] of Object.entries(RULES.scoring)) {
@@ -453,11 +402,8 @@ function applyScoringWithExplain(row) {
 
         if (r.type === "map") {
           const pts = (r.points_map?.[value] || 0);
-          if (pts > 0) {
-            correct.push(`+${pts} [${block}] ${r.header} = "${safeStr(value)}"`);
-          } else {
-            incorrect.push(`[${block}] ${r.header} = "${safeStr(value)}" (0 pts)`);
-          }
+          if (pts > 0) correct.push(`+${pts} [${block}] ${r.header} = "${safeStr(value)}"`);
+          else incorrect.push(`[${block}] ${r.header} = "${safeStr(value)}" (0 pts)`);
           subtotal += pts;
         }
       }
@@ -465,16 +411,12 @@ function applyScoringWithExplain(row) {
       const applied = Math.min(subtotal, ruleset.cap);
       total += applied;
 
-      if (subtotal > ruleset.cap) {
-        correct.push(`[${block}] cap aplicado: ${applied}/${ruleset.cap}`);
-      } else {
-        correct.push(`[${block}] subtotal: ${applied}/${ruleset.cap}`);
-      }
+      if (subtotal > ruleset.cap) correct.push(`[${block}] cap aplicado: ${applied}/${ruleset.cap}`);
+      else correct.push(`[${block}] subtotal: ${applied}/${ruleset.cap}`);
 
       continue;
     }
 
-    // blocks array
     for (const r of ruleset) {
       const value = row[r.header] || "";
 
@@ -530,9 +472,7 @@ function applyScoringWithExplain(row) {
     }
   }
 
-  // clamp por seguridad
   total = Math.max(0, Math.min(maxScore, total));
-
   return { total, maxScore, correct, incorrect };
 }
 
@@ -561,9 +501,7 @@ function applyFlags(row) {
     if (safeStr(v).length < 120) flags.push("FLAG_TEXTO_CORTO");
     if (isGeneric(v)) flags.push("FLAG_TEXTO_GENERICO");
     if (!hasActionVerb(v)) flags.push("FLAG_SIN_VERBOS");
-    if (/ingres|ganar|rentab|facil|garant/i.test(safeStr(v))) {
-      flags.push("FLAG_RIESGO_MARKETING");
-    }
+    if (/ingres|ganar|rentab|facil|garant/i.test(safeStr(v))) flags.push("FLAG_RIESGO_MARKETING");
   }
 
   if (!safeStr(row["9/33. Email de contacto (confirmación)"]).includes("@") ||
@@ -585,18 +523,17 @@ const output = document.getElementById("output");
 
 // ======================================================
 // PASO 2.3 — Integración capa humana + dataset activo
-// - crea ds = { meta, results, human_overrides }
-// - conserva human_overrides si es el mismo archivo (fingerprint)
-// - enriquece results con: score_auto/score_humano/score_total + estado_final + pendiente_humano
 // ======================================================
 
 function enrichResultsWithHuman(ds) {
   const hasHuman = (window.HumanPSV && typeof HumanPSV.getOverride === "function");
   const out = (ds.results || []).map(r => {
-    const rowIndex = r.fila;               // usamos "fila" como row_index (estable y único)
+    const rowIndex = r.fila;
     const email = r.email || "";
     const override = hasHuman ? HumanPSV.getOverride(ds, email, rowIndex) : null;
 
+    // IMPORTANTE:
+    // r.score AHORA ES EL % de Parte 2/3 (0..100) para que UI muestre "Total" correcto
     const sc = hasHuman
       ? HumanPSV.computeScores(r.score ?? 0, override)
       : { score_auto: Number(r.score ?? 0), score_humano: 0, score_total: Number(r.score ?? 0) };
@@ -657,7 +594,7 @@ fileInput.addEventListener("change", async () => {
     ACTION_VERBS = await loadJSON("rules/action_verbs.json");
     GENERIC_WORDS = await loadJSON("rules/generic_words.json");
 
-    // Versionado (opcional pero útil)
+    // Versionado
     let version = "—";
     try {
       const res = await fetch("/version/current.txt");
@@ -673,70 +610,58 @@ fileInput.addEventListener("change", async () => {
     const fileHeaders = rows[0] || [];
     const dataRows = rows.slice(1);
 
-    // Mapeo robusto: expected -> real header del XLSX
     const headerMap = buildHeaderMap(fileHeaders);
-
-    // Validación: SOLO faltantes reales, NO "extras"
     validateHeaders(fileHeaders, headerMap);
 
-    // Índices rápidos de columnas reales
     const idxByRealHeader = {};
     fileHeaders.forEach((h, i) => { idxByRealHeader[h] = i; });
 
-    // Resultados por fila
     const results = dataRows.map((row, i) => {
       const obj = {};
 
-      // Construimos el objeto con CLAVES "esperadas" (las que usan reglas)
-      // pero leyendo los valores desde el header real del XLSX.
       for (const eh of EXPECTED_HEADERS) {
         const realHeader = headerMap[eh];
         const idx = idxByRealHeader[realHeader];
         obj[eh] = (idx !== undefined) ? (row[idx] ?? "") : "";
       }
 
-      // Datos mínimos para UI
       const nombre = obj["8/33. Nombre y apellido"] || "";
       const email = obj["9/33. Email de contacto (confirmación)"] || "";
 
-      // Gates + explicación (se conservan como DEBUG, pero NO deciden ESTADO)
+      // DEBUG: gates+scoring siguen existiendo para auditoría (no deciden estado)
       const gate = applyGatesWithExplain(obj);
-
-      // Scoring completo (se conserva como DEBUG/score, pero NO decide ESTADO)
-      // Nota: si falló gate, sc no se calcula (como antes).
       let sc = { total: 0, maxScore: 100, correct: [], incorrect: [] };
-      if (!gate.failed) {
-        sc = applyScoringWithExplain(obj);
-      }
+      if (!gate.failed) sc = applyScoringWithExplain(obj);
 
       const flags = applyFlags(obj);
-
       const correctAll = gate.failed ? [...gate.correct] : [...gate.correct, ...sc.correct];
       const incorrectAll = gate.failed ? [...gate.incorrect] : [...gate.incorrect, ...sc.incorrect];
 
-      // ============================
-      // ÍNDICE 12 — PARTE 2/3 (A+B)
-      // closed_eval SIEMPRE se calcula desde las 13 cerradas
-      // y ESTADO (panel principal) sale SOLO de closed_eval.pct_ok
-      // ============================
+      // ÍNDICE 12: closed_eval siempre desde 13 cerradas
       const closed_eval = buildClosedEval(obj);
 
-      let estado_ia = "DESCARTADO_AUTO";
-      if (closed_eval.pct_ok >= 70) {
-        estado_ia = "REVISAR_AUTO";
-      } else {
-        estado_ia = "DESCARTADO_AUTO";
-      }
+      // ESTADO IA: solo 2 estados
+      const estado_ia = (closed_eval.pct_ok >= 70) ? "REVISAR_AUTO" : "DESCARTADO_AUTO";
 
-      // Motivo alineado a Parte 2/3 (sin mezclar con gates/scoring)
+      // Motivo alineado a Parte 2/3
       const motivo = `Parte 2/3: ${closed_eval.pct_ok}% (válidas ${closed_eval.ok_count}/13)`;
 
+      // CLAVE: Para que la TABLA PRINCIPAL muestre el % correcto en "Total",
+      // usamos score=maxScore como (pct_ok/100).
+      // Guardamos scoring completo aparte (sin romper nada).
       return {
         fila: i + 2,
         nombre,
         email,
-        score: sc.total,
-        maxScore: sc.maxScore,
+
+        // UI (columna Total) -> Parte 2/3
+        score: closed_eval.pct_ok,
+        maxScore: 100,
+
+        // Debug scoring completo (no UI)
+        score_scoring: sc.total,
+        maxScore_scoring: sc.maxScore,
+
         estado: estado_ia,
         estado_ia,
         motivo,
@@ -748,7 +673,6 @@ fileInput.addEventListener("change", async () => {
       };
     });
 
-    // Meta para historial
     const now = new Date();
     const meta = {
       runId: `${now.getTime()}_${Math.random().toString(16).slice(2)}`,
@@ -757,19 +681,13 @@ fileInput.addEventListener("change", async () => {
       fingerprint: `${file.name}|${file.size}|${file.lastModified}`
     };
 
-    // Render FASE D (UI)
     UI.renderAll({ results, version, meta });
 
-    // Dataset activo (conserva overrides si es mismo XLSX)
     const ds = loadOrCreateActiveDataset(meta, results, version);
-
-    // Enriquecemos para UI con capa humana
     const resultsFinal = enrichResultsWithHuman(ds);
 
-    // Render FASE D (UI) usando FINAL
     UI.renderAll({ results: resultsFinal, version, meta });
 
-    // Debug
     console.log("RESULTADO FINAL:", results);
 
   } catch (err) {
