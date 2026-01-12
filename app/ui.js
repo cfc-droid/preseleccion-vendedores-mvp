@@ -185,10 +185,16 @@ window.UI = (() => {
     return { ok: true, pts: 0, why: "—" };
   }
 
+  function pctFixed13() {
+    const v = 100 / 13; // 7.6923...
+    return v.toFixed(2).replace(".", ",") + "%";
+  }
+
   function buildFixedClosedRows(item, RULES) {
     // Siempre devuelve 13 filas (Q_CERRADAS_FIXED)
     const rr = item.rowRaw || {};
     const out = [];
+    const PCT_OK = pctFixed13();
 
     // Index gates por header exacto
     const gates = Array.isArray(RULES?.gates) ? RULES.gates : [];
@@ -214,7 +220,6 @@ window.UI = (() => {
     for (const it of scoringRulesFlat) {
       const h = it?.r?.header;
       if (!h) continue;
-      // Si hay repetidos, preferimos el primero (regla “oficial” por header)
       if (!scoringByHeader[h]) scoringByHeader[h] = it;
     }
 
@@ -222,44 +227,89 @@ window.UI = (() => {
       const qid = Q_CERRADAS_FIXED[i];
       const header = QID_TO_HEADER[qid] || "";
       const qtext = header ? questionTextFromHeader(header) : qid;
-      const ans = header ? rr[header] : "";
 
-      let estado = "—";
-      let why = "—";
-      let pts = "—";
+      const ansRaw = header ? rr[header] : "";
+      const ansTrim = String(ansRaw ?? "").trim();
 
-      // 1) Gate si existe (se considera criterio “hard”)
+      let estado = "INCORRECTA";
+      let why = "Celda vacía";
+      let pts = "0";
+
+      // REGLA BASE (TU PEDIDO):
+      // - vacío => NO OK => 0
+      // - OK => 7,69%
+      if (!ansTrim.length) {
+        out.push({
+          idx: i + 1,
+          qid,
+          qtext,
+          ans: safeVal(ansRaw),
+          estado,
+          why,
+          pts
+        });
+        continue;
+      }
+
+      // Si tiene respuesta, evaluamos según rules_v1.json:
+      // 1) Gate: si falla => NO OK
       const g = header ? gateByHeader[header] : null;
       if (g) {
-        const evg = evalGateRule(g, ans);
-        estado = evg.ok ? "CORRECTA" : "INCORRECTA";
-        why = evg.why;
-        pts = "Gate";
+        const evg = evalGateRule(g, ansRaw);
+        if (!evg.ok) {
+          estado = "INCORRECTA";
+          why = evg.why;
+          pts = "0";
+          out.push({
+            idx: i + 1,
+            qid,
+            qtext,
+            ans: safeVal(ansRaw),
+            estado,
+            why,
+            pts
+          });
+          continue;
+        }
       }
 
-      // 2) Scoring si existe (si no hay gate, o además de gate)
+      // 2) Scoring: equals / map / contains_all define OK/NO OK
       const sr = header ? scoringByHeader[header] : null;
       if (sr && sr.r) {
-        const evs = evalScoringRule(sr.r, ans);
-        // Si ya había gate y falló, mantenemos INCORRECTA (hard fail). Si gate ok, usamos scoring.
-        if (estado === "—" || estado === "CORRECTA") {
-          estado = evs.ok ? "CORRECTA" : "INCORRECTA";
-        }
-        // Justificación: preferimos gate si falló; si no, scoring.
-        if (estado === "INCORRECTA" && g && !evalGateRule(g, ans).ok) {
-          // dejar why de gate
+        const evs = evalScoringRule(sr.r, ansRaw);
+        if (evs.ok) {
+          estado = "CORRECTA";
+          why = sr.block ? `[${sr.block}] OK` : "OK";
+          pts = PCT_OK;
         } else {
-          why = sr.block ? `[${sr.block}] ${evs.why}` : evs.why;
+          estado = "INCORRECTA";
+          why = sr.block ? `[${sr.block}] NO OK` : "NO OK";
+          pts = "0";
         }
-        pts = String(evs.pts);
+
+        out.push({
+          idx: i + 1,
+          qid,
+          qtext,
+          ans: safeVal(ansRaw),
+          estado,
+          why,
+          pts
+        });
+        continue;
       }
 
-      // 3) Si no hay ni gate ni scoring para ese Q, igual mostramos fila fija
+      // 3) Sin gate ni scoring:
+      // (Esto NO inventa nada: es exactamente Q16 “Sí/No OK; vacío NO OK”)
+      estado = "CORRECTA";
+      why = "OK";
+      pts = PCT_OK;
+
       out.push({
         idx: i + 1,
         qid,
         qtext,
-        ans: safeVal(ans),
+        ans: safeVal(ansRaw),
         estado,
         why,
         pts
