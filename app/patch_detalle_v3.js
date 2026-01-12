@@ -1,5 +1,5 @@
 // =====================================================
-// PATCH DETALLE V3 (UNICO)
+// PATCH DETALLE V3 (UNICO) — CORREGIDO
 // - NO toca ui.js
 // - Inserta PARTE 1/3 ARRIBA (debajo del header de pills) y OCULTA la PARTE 1/3 vieja
 // - Inserta PARTE 1/3 con 5 columnas clave:
@@ -7,10 +7,11 @@
 //   (2 humano) Observación / Porcentaje -> editables + localStorage
 // - Evalúa con rules/open_signals_v1.json
 //
-// FIXES:
-// (A) Ubicación: ahora aparece arriba (no abajo)
-// (B) Oculta solo la miniCard vieja de "PARTE 1/3" (no elimina nada)
-// (C) Porcentaje humano: SOLO 0 ó 8,33 (cualquier otro valor => 0)
+// FIXES IMPORTANTES (esta versión):
+// (1) NO oculta el bloque nuevo (antes hideOldParte13 ocultaba TODO lo que diga "PARTE 1/3").
+// (2) Inserta arriba usando :scope > div.row (solo el header real del panel).
+// (3) Anti-loop: evita repatch mientras inserta (MutationObserver).
+// (4) extractRowRaw más robusto (div/pre/code).
 // =====================================================
 
 (() => {
@@ -25,6 +26,9 @@
   // porcentaje permitido (solo 2 valores)
   const PCT_ALLOWED = "8.33"; // guardamos con punto
   const PCT_ALLOWED_DISPLAY = "8,33"; // para placeholder UI
+
+  // Flag anti-loop para MutationObserver
+  let _IS_PATCHING = false;
 
   // -------------------------
   // Helpers
@@ -132,13 +136,22 @@
   const Q_ABIERTAS_ALTA = ["Q1","Q9","Q13","Q14","Q15","Q18","Q21","Q22","Q23","Q27","Q30","Q31"];
 
   // -------------------------
-  // Extraer rowRaw del DOM
+  // Extraer rowRaw del DOM (robusto)
   // -------------------------
   function extractRowRaw(panel) {
-    const divs = [...panel.querySelectorAll("div")];
-    const candidate = divs
-      .map(d => d.textContent || "")
-      .find(t => t.trim().startsWith("{") && t.includes('"Marca temporal"'));
+    // 1) Buscar en div/pre/code (cubre ui.js cambiando wrappers)
+    const nodes = [
+      ...panel.querySelectorAll("div"),
+      ...panel.querySelectorAll("pre"),
+      ...panel.querySelectorAll("code"),
+    ];
+
+    const candidate = nodes
+      .map(n => n.textContent || "")
+      .find(t => {
+        const s = t.trim();
+        return s.startsWith("{") && s.includes('"Marca temporal"') && s.includes('"Dirección de correo electrónico"');
+      });
 
     if (!candidate) return null;
 
@@ -151,10 +164,15 @@
 
   // -------------------------
   // Ocultar la PARTE 1/3 vieja (miniCard de ui.js)
+  // IMPORTANTE: NO ocultar nada dentro de nuestro WRAP
   // -------------------------
   function hideOldParte13(panel) {
     const cards = [...panel.querySelectorAll(".miniCard")];
+
     for (const c of cards) {
+      // Si está dentro del wrap nuevo, NO TOCAR
+      if (c.closest(`#${WRAP_ID}`)) continue;
+
       const title = c.querySelector(".sectionTitle")?.textContent || "";
       if (norm(title).includes("parte 1/3")) {
         c.style.display = "none"; // SOLO ocultar
@@ -473,57 +491,72 @@
   async function patch(panel) {
     if (!panel) return;
     if (panel.style.display === "none") return;
+    if (_IS_PATCHING) return;
 
-    ensureInnerStyle();
+    _IS_PATCHING = true;
+    try {
+      ensureInnerStyle();
 
-    // OCULTAR la Parte 1/3 vieja (solo display none)
-    hideOldParte13(panel);
+      // OCULTAR la Parte 1/3 vieja (solo display none) SIN tocar la nueva
+      hideOldParte13(panel);
 
-    const rowRaw = extractRowRaw(panel);
-    if (!rowRaw) return;
+      const rowRaw = extractRowRaw(panel);
+      if (!rowRaw) return;
 
-    const rowKey = buildRowKey(rowRaw);
-    const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
-    const existingWrap = panel.querySelector(`#${WRAP_ID}`);
-    if (prevKey === rowKey && existingWrap) return;
+      const rowKey = buildRowKey(rowRaw);
+      const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
+      const existingWrap = panel.querySelector(`#${WRAP_ID}`);
+      if (prevKey === rowKey && existingWrap) {
+        // igual fila, ya está
+        return;
+      }
 
-    if (existingWrap) existingWrap.remove();
+      if (existingWrap) existingWrap.remove();
 
-    const wrap = document.createElement("div");
-    wrap.id = WRAP_ID;
-    wrap.innerHTML = await renderParte13_V3(rowRaw);
+      const wrap = document.createElement("div");
+      wrap.id = WRAP_ID;
+      wrap.innerHTML = await renderParte13_V3(rowRaw);
 
-    // INSERTAR ARRIBA:
-    // ui.js arma primero un <div class="row" ...> (pills + cerrar)
-    // Lo dejamos, y ponemos V3 inmediatamente DESPUÉS.
-    const topRow = panel.querySelector("div.row");
-    if (topRow && topRow.parentNode === panel) {
-      const ref = topRow.nextSibling; // puede ser textnode
-      panel.insertBefore(wrap, ref);
-    } else {
-      // fallback: al inicio absoluto
-      panel.insertBefore(wrap, panel.firstChild);
+      // INSERTAR ARRIBA:
+      // ui.js arma primero un <div class="row" ...> (pills + cerrar)
+      // Queremos SOLO el row directo hijo del panel (no rows internos).
+      const topRow = panel.querySelector(":scope > div.row");
+      if (topRow) {
+        const ref = topRow.nextSibling; // puede ser textnode
+        panel.insertBefore(wrap, ref);
+      } else {
+        // fallback: al inicio absoluto
+        panel.insertBefore(wrap, panel.firstChild);
+      }
+
+      panel.setAttribute(PATCH_KEY_ATTR, rowKey);
+
+      // Bind humano (load + autosave)
+      bindHumanEditors(panel);
+
+      // Re-ocultar por si ui.js reinsertó algo luego
+      hideOldParte13(panel);
+    } finally {
+      _IS_PATCHING = false;
     }
-
-    panel.setAttribute(PATCH_KEY_ATTR, rowKey);
-
-    // Bind humano (load + autosave)
-    bindHumanEditors(panel);
   }
 
   function bindHumanEditors(panel) {
-    const db = loadHumanDB();
     const wrap = panel.querySelector(`#${WRAP_ID}`);
     if (!wrap) return;
 
     const rows = [...wrap.querySelectorAll('tr[data-hkey]')];
+    if (!rows.length) return;
+
+    // cargar una vez (pero guardamos recargando para evitar pisadas)
+    const db0 = loadHumanDB();
 
     for (const tr of rows) {
       const hkey = tr.getAttribute("data-hkey");
       const ta = tr.querySelector("textarea");
       const inp = tr.querySelector('input[type="number"]');
 
-      const saved = db[hkey] || { obs: "", pct: "0" };
+      const saved = db0[hkey] || { obs: "", pct: "0" };
 
       if (ta) ta.value = saved.obs || "";
       if (inp) inp.value = normalizePctInput(saved.pct ?? "0");
@@ -545,7 +578,6 @@
       if (ta) ta.addEventListener("input", saveNow);
 
       if (inp) {
-        // input en vivo + blur/enter
         inp.addEventListener("input", saveNow);
         inp.addEventListener("blur", saveNow);
         inp.addEventListener("keydown", (e) => {
