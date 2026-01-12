@@ -80,14 +80,32 @@
     "filtros": [
       {
         "header": "2/33. ¿Aceptás cobrar solo por resultados (COMISIÓN)?",
-        "type": "equals",
-        "value": "Sí",
+        "type": "map",
+        "points_map": {
+          "Sí": 1,
+          "SI": 1,
+          "Si": 1,
+          "sí": 1,
+          "si": 1,
+          "No": 0,
+          "NO": 0,
+          "no": 0
+        },
         "points": 10
       },
       {
         "header": "3/33. ¿Buscás empleo o sueldo?",
-        "type": "equals",
-        "value": "No",
+        "type": "map",
+        "points_map": {
+          "No": 1,
+          "NO": 1,
+          "no": 1,
+          "Sí": 0,
+          "SI": 0,
+          "Si": 0,
+          "sí": 0,
+          "si": 0
+        },
         "points": 10
       },
       {
@@ -114,9 +132,31 @@
       },
       {
         "header": "6/33. ¿Leíste completo el anuncio y la advertencia?",
-        "type": "equals",
-        "value": "Sí",
+        "type": "map",
+        "points_map": {
+          "Sí": 1,
+          "SI": 1,
+          "Si": 1,
+          "sí": 1,
+          "si": 1,
+          "No": 0,
+          "NO": 0,
+          "no": 0
+        },
         "points": 5
+      },
+      {
+        "header": "7/33. Hotmart",
+        "type": "map",
+        "points_map": {
+          "Sí, ya tengo": 1,
+          "Si, ya tengo": 1,
+          "SI, ya tengo": 1,
+          "No, pero la puedo crear hoy": 1,
+          "NO, pero la puedo crear hoy": 1,
+          "No, y no quiero usar Hotmart": 0,
+          "NO, y no quiero usar Hotmart": 0
+        }
       },
       {
         "header": "25/33. ¿Alguna vez hiciste spam o te reportaron?",
@@ -124,16 +164,30 @@
         "points_map": {
           "NO": 1,
           "No": 1,
+          "no": 1,
           "Sí": 0,
-          "Si": 0
+          "Si": 0,
+          "SI": 0,
+          "sí": 0,
+          "si": 0,
+          "SÍ": 0
         }
       }
     ],
     "experiencia": [
       {
         "header": "12/33. ¿Vendiste productos digitales o educativos antes?",
-        "type": "equals",
-        "value": "Sí",
+        "type": "map",
+        "points_map": {
+          "Sí": 1,
+          "SI": 1,
+          "Si": 1,
+          "sí": 1,
+          "si": 1,
+          "No": 0,
+          "NO": 0,
+          "no": 0
+        },
         "points": 10
       },
       {
