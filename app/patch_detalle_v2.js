@@ -590,7 +590,6 @@
       }
 
       signals.push("❌ Respuesta INCORRECTA");
-      if (nLines < 3) signals.compute = 1;
       if (nLines < 3) signals.push("No cumple mínimo de 3 lugares (1 por línea)");
       if (genericLine) signals.push("Demasiado genérico (sin lugares reales)");
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
@@ -911,7 +910,7 @@
             <thead>
               <tr>
                 <th style="width:60px;">N°</th>
-                <th style="width:320px;">12 PREGUNTAS “ABIERTAS” — PRIORIDAD ALTA</th>
+                <th style="width:320px;">12 PREGUNTAS “ABIERTAS” — PRIOR (FQ) ALTA</th>
                 <th style="width:360px;">RESPUESTA DEL VENDEDOR</th>
                 <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
                 <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
@@ -1198,5 +1197,10 @@
     patch(panel);
   }
 
-  document.addEventListener("DOMContentLoaded", init);
+  // FIX CLAVE: si el script carga DESPUÉS de DOMContentLoaded, igual inicializa
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();
