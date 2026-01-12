@@ -6,7 +6,7 @@
 // 2) Evita que se "estire" a la derecha + fuerza barras (scroll) donde corresponde
 // 3) Parte 2/3: primero resumen chico, luego tabla 13 preguntas (reorden DOM original)
 // 4) Parte 3/3: oculta columna "Largo"
-// =====================================================
+// ====================================================
 
 (() => {
   const DETAIL_ID = "detailPanel";
