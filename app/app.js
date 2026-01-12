@@ -120,9 +120,19 @@ function safeStr(v) {
   return String(v ?? "");
 }
 
+function toPctTxt(n) {
+  // 7.6923 -> "7,69%"
+  const v = Math.round(Number(n) * 100) / 100;
+  return v.toFixed(2).replace(".", ",") + "%";
+}
+
 
 // ======================================================
 // NUEVO — PARTE 2/3 (CERRADAS) ESTRUCTURADA PARA UI
+// (ÍNDICE 12: A y B)
+// - ESTADO (panel principal) debe depender SOLO de estas 13
+// - PUNTAJE: SOLO "0" o "7,69%" (si hay respuesta)
+// - JUSTIFICACIÓN: SOLO empieza con "OK porque ..." o "NO ES VALIDO porque ..."
 // ======================================================
 
 const Q_CERRADAS_HEADERS = [
@@ -150,64 +160,135 @@ function questionTextFromHeader33(header) {
   return String(header || "").replace(/^\d+\/33\.\s*/, "").trim();
 }
 
-function closedJustification(header, answer, isOk) {
-  const a = safeStr(answer).trim();
-  if (!a) return "Sin respuesta";
-
-  if (header.startsWith("2/33.")) return isOk ? "Acepta comisión" : "No acepta comisión";
-  if (header.startsWith("3/33.")) return isOk ? "No busca empleo/sueldo" : "Busca empleo/sueldo";
-  if (header.startsWith("6/33.")) return isOk ? "Leyó anuncio/advertencia" : "No leyó anuncio/advertencia";
-  if (header.startsWith("7/33.")) return isOk ? "Acepta Hotmart" : "Rechaza Hotmart";
-  if (header.startsWith("12/33.")) return isOk ? "Tiene experiencia en digitales" : "No tiene experiencia en digitales";
-  if (header.startsWith("24/33.")) return isOk ? "Acepta reglas éticas" : "No acepta todas las reglas";
-  if (header.startsWith("4/33.")) return isOk ? "Horas suficientes" : "Horas insuficientes";
-  if (header.startsWith("5/33.")) return isOk ? "Conversaciones suficientes" : "Conversaciones insuficientes";
-
-  return isOk ? "Cumple" : "No cumple";
+function getGateByHeader(header) {
+  const gates = Array.isArray(RULES?.gates) ? RULES.gates : [];
+  return gates.find(g => g && g.header === header) || null;
 }
 
-function buildClosedEval(rowObj, correctList, incorrectList) {
-  const pctWeight = 100 / 13; // 13 preguntas => 7.692...
-
-  const okSet = new Set();
-  const badSet = new Set();
-
-  for (const h of Q_CERRADAS_HEADERS) {
-    const inCorrect = (correctList || []).some(s => String(s).includes(h));
-    const inIncorrect = (incorrectList || []).some(s => String(s).includes(h));
-    if (inIncorrect) badSet.add(h);
-    else if (inCorrect) okSet.add(h);
-    else badSet.add(h); // seguridad: si no aparece, queda como incorrecta
+function getScoringRuleByHeader(header) {
+  // Busca la primera regla de scoring cuyo header coincida (equals/contains_all/map)
+  const scoring = RULES?.scoring || {};
+  for (const [block, ruleset] of Object.entries(scoring)) {
+    if (block === "canales" && ruleset && Array.isArray(ruleset.rules)) {
+      for (const r of ruleset.rules) {
+        if (r?.header === header) return { block, r };
+      }
+      continue;
+    }
+    if (Array.isArray(ruleset)) {
+      for (const r of ruleset) {
+        if (r?.header === header) return { block, r };
+      }
+    }
   }
+  return null;
+}
+
+function evalClosedOk(header, answer) {
+  // Regla de decisión (sin inventar reglas nuevas):
+  // 1) Si existe GATE para ese header y el gate falla -> NO válido
+  // 2) Si existe scoring equals/contains_all/map -> válido si cumple (o suma >0 en map)
+  // 3) Si no hay regla, pero hay respuesta -> válido (mínimo)
+  // 4) Si no hay respuesta -> no decide columnas (quedan vacías), pero para % cuenta como no OK.
+
+  const a = safeStr(answer).trim();
+  if (!a) {
+    return { hasAnswer: false, isOk: false, whyCore: "" };
+  }
+
+  // 1) Gate del header (si existe)
+  const g = getGateByHeader(header);
+  if (g) {
+    const r = evalGate(g, a);
+    if (!r.ok) {
+      return { hasAnswer: true, isOk: false, whyCore: g.reason || "No cumple gate" };
+    }
+  }
+
+  // 2) Scoring rule (si existe)
+  const sr = getScoringRuleByHeader(header);
+  if (sr && sr.r) {
+    const r = sr.r;
+
+    if (r.type === "equals") {
+      const ok = a === String(r.value ?? "");
+      return {
+        hasAnswer: true,
+        isOk: ok,
+        whyCore: ok ? `respondió "${a}" y coincide con lo esperado` : `respondió "${a}" y no coincide con lo esperado`
+      };
+    }
+
+    if (r.type === "contains_all") {
+      const norm = normalizeText(a);
+      const ok = (r.value || []).every(v => norm.includes(normalizeText(v)));
+      return {
+        hasAnswer: true,
+        isOk: ok,
+        whyCore: ok ? "incluye todas las reglas obligatorias" : "no incluye todas las reglas obligatorias"
+      };
+    }
+
+    if (r.type === "map") {
+      const pts = Number((r.points_map && (r.points_map[a] ?? r.points_map[String(a)])) || 0);
+      const ok = pts > 0;
+      return {
+        hasAnswer: true,
+        isOk: ok,
+        whyCore: ok ? `suma puntos (${pts})` : "no suma puntos (0)"
+      };
+    }
+  }
+
+  // 3) Sin reglas: si hay respuesta, lo consideramos válido mínimo
+  return { hasAnswer: true, isOk: true, whyCore: "hay respuesta" };
+}
+
+function closedJustificationStrict(header, answer, isOk, whyCore) {
+  // IMPORTANTE: formato obligatorio
+  const a = safeStr(answer).trim();
+  if (!a) return "";
+
+  if (isOk) return `OK porque ${whyCore || "cumple la condición"}.`;
+  return `NO ES VALIDO porque ${whyCore || "no cumple la condición"}.`;
+}
+
+function buildClosedEval(rowObj) {
+  const pctWeight = 100 / 13; // 7.6923...
 
   const detalle = Q_CERRADAS_HEADERS.map(h => {
     const ans = rowObj[h] ?? "";
-    const is_ok = okSet.has(h) && !badSet.has(h);
+    const ev = evalClosedOk(h, ans);
+
+    const just = closedJustificationStrict(h, ans, ev.isOk, ev.whyCore);
+
+    // columnas: solo si hay respuesta
+    const puntaje = ev.hasAnswer ? (ev.isOk ? toPctTxt(pctWeight) : "0") : "";
+    const justificacion_ia = ev.hasAnswer ? just : "";
+
     return {
       qid: qidFromHeader33(h),
       header: h,
       pregunta: questionTextFromHeader33(h),
       answer: safeStr(ans),
-      is_ok,
+      is_ok: ev.isOk,
       pct_weight: pctWeight,
-      justificacion_ia: closedJustification(h, ans, is_ok)
+      puntaje,                 // "7,69%" o "0" o ""
+      justificacion_ia         // empieza con OK porque / NO ES VALIDO porque / o ""
     };
   });
 
+  const total = detalle.length; // 13
   const ok_count = detalle.filter(d => d.is_ok).length;
-  const bad_count = detalle.length - ok_count;
-  const pct_ok = Math.round((ok_count / detalle.length) * 100);
+  const bad_count = total - ok_count;
 
-  let estado_detalle_cerradas = "DESCARTADO";
-  if (pct_ok >= 70) estado_detalle_cerradas = "APTO";
-  else if (pct_ok >= 50) estado_detalle_cerradas = "REVISAR";
+  const pct_ok = Math.round((ok_count / total) * 100);
 
   return {
-    total: detalle.length,
+    total,
     ok_count,
     bad_count,
     pct_ok,
-    estado_detalle_cerradas,
     detalle
   };
 }
@@ -314,7 +395,7 @@ function applyGatesWithExplain(row) {
     };
   }
 
-  // banned gate
+  // banned gate (GBAN)
   if (RULES.banned_words_gate?.enabled) {
     let found = null;
     for (const v of Object.values(row)) {
@@ -618,52 +699,37 @@ fileInput.addEventListener("change", async () => {
       const nombre = obj["8/33. Nombre y apellido"] || "";
       const email = obj["9/33. Email de contacto (confirmación)"] || "";
 
-      // Gates + explicación
+      // Gates + explicación (se conservan como DEBUG, pero NO deciden ESTADO)
       const gate = applyGatesWithExplain(obj);
 
-      if (gate.failed) {
-        const closed_eval = buildClosedEval(obj, gate.correct, gate.incorrect);
-
-        return {
-          fila: i + 2,
-          nombre,
-          email,
-          score: 0,
-          maxScore: 100,
-          estado: "DESCARTADO_AUTO",
-          motivo: gate.reason,
-          flags: [],
-          correct: gate.correct,
-          incorrect: gate.incorrect,
-          rowRaw: obj,
-          closed_eval
-        };
+      // Scoring completo (se conserva como DEBUG/score, pero NO decide ESTADO)
+      // Nota: si falló gate, sc no se calcula (como antes).
+      let sc = { total: 0, maxScore: 100, correct: [], incorrect: [] };
+      if (!gate.failed) {
+        sc = applyScoringWithExplain(obj);
       }
 
-      // Scoring + explicación
-      const sc = applyScoringWithExplain(obj);
-
-      // Flags (no deciden)
       const flags = applyFlags(obj);
 
-      let estado_ia = "DESCARTADO_AUTO";
-      let motivo = "";
+      const correctAll = gate.failed ? [...gate.correct] : [...gate.correct, ...sc.correct];
+      const incorrectAll = gate.failed ? [...gate.incorrect] : [...gate.incorrect, ...sc.incorrect];
 
-      if (sc.total >= RULES.thresholds.approve_min) {
-        estado_ia = "APTO_AUTO";
-        motivo = `Score ≥ ${RULES.thresholds.approve_min}`;
-      } else if (sc.total >= RULES.thresholds.review_min) {
+      // ============================
+      // ÍNDICE 12 — PARTE 2/3 (A+B)
+      // closed_eval SIEMPRE se calcula desde las 13 cerradas
+      // y ESTADO (panel principal) sale SOLO de closed_eval.pct_ok
+      // ============================
+      const closed_eval = buildClosedEval(obj);
+
+      let estado_ia = "DESCARTADO_AUTO";
+      if (closed_eval.pct_ok >= 70) {
         estado_ia = "REVISAR_AUTO";
-        motivo = `Score ${RULES.thresholds.review_min}–${RULES.thresholds.approve_min - 1}`;
       } else {
         estado_ia = "DESCARTADO_AUTO";
-        motivo = `Score < ${RULES.thresholds.review_min}`;
       }
 
-      const correctAll = [...gate.correct, ...sc.correct];
-      const incorrectAll = [...gate.incorrect, ...sc.incorrect];
-
-      const closed_eval = buildClosedEval(obj, correctAll, incorrectAll);
+      // Motivo alineado a Parte 2/3 (sin mezclar con gates/scoring)
+      const motivo = `Parte 2/3: ${closed_eval.pct_ok}% (válidas ${closed_eval.ok_count}/13)`;
 
       return {
         fila: i + 2,
@@ -680,7 +746,6 @@ fileInput.addEventListener("change", async () => {
         rowRaw: obj,
         closed_eval
       };
-
     });
 
     // Meta para historial
