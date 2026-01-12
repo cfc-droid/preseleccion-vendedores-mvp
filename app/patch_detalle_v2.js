@@ -717,6 +717,46 @@
     return { total, validas, incorrectas, pctValid, pctInc, estadoDef };
   }
 
+  function computeParte13StatsFromLS(rowKey) {
+    const total = Q_ABIERTAS_ALTA.length; // 12
+    const pctOk = pctFixed(1, 12); // "8,33%"
+
+    let validas = 0;
+    for (const qid of Q_ABIERTAS_ALTA) {
+      const v = tryGetLS(lsKeyP13(rowKey, qid, "pct")) ?? "0";
+      if (String(v) === pctOk) validas++;
+    }
+
+    const incorrectas = total - validas;
+
+    const pctValid = total ? Math.round((validas / total) * 100) : 0;
+    const pctInc = total ? Math.round((incorrectas / total) * 100) : 0;
+
+    const estadoDef = (pctValid >= 70) ? "APROBADO" : "NO VALIDO";
+
+    return { total, validas, incorrectas, pctValid, pctInc, estadoDef };
+  }
+
+  function updateParte13SummaryLive(root, rowKey) {
+    if (!root) return;
+
+    const stats = computeParte13StatsFromLS(rowKey);
+
+    const elTotal = root.querySelector("#p13_sum_total");
+    const elVal = root.querySelector("#p13_sum_validas");
+    const elPctV = root.querySelector("#p13_sum_pctvalid");
+    const elEstado = root.querySelector("#p13_sum_estado");
+    const elInc = root.querySelector("#p13_sum_incorrectas");
+    const elPctI = root.querySelector("#p13_sum_pctinc");
+
+    if (elTotal) elTotal.textContent = String(stats.total);
+    if (elVal) elVal.textContent = String(stats.validas);
+    if (elPctV) elPctV.textContent = String(stats.pctValid) + "%";
+    if (elEstado) elEstado.innerHTML = "<b>" + esc(stats.estadoDef) + "</b>";
+    if (elInc) elInc.textContent = String(stats.incorrectas);
+    if (elPctI) elPctI.textContent = String(stats.pctInc) + "%";
+  }
+
   // -------------------------
   // Render Parte 1/3 (ABIERTAS ALTA)
   // - AGREGA resumen arriba (Imagen 1)
@@ -728,7 +768,7 @@
     const pctFixedTxt = pctFixed(1, 12); // "8,33%"
     const aux = await loadAuxOnce();
 
-    const stats = computeParte13Stats(rowRaw, aux);
+    const stats = computeParte13StatsFromLS(rowKey);
 
     const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
@@ -805,20 +845,20 @@
             <tbody>
               <tr>
                 <td><b>TOTAL DE PREGUNTAS</b></td>
-                <td>${stats.total}</td>
+                <td id="p13_sum_total">${stats.total}</td>
                 <td>100%</td>
                 <td>—</td>
               </tr>
               <tr>
                 <td><b>RESPUESTAS VÁLIDAS</b></td>
-                <td>${stats.validas}</td>
-                <td>${stats.pctValid}%</td>
-                <td><b>${esc(stats.estadoDef)}</b></td>
+                <td id="p13_sum_validas">${stats.validas}</td>
+                <td id="p13_sum_pctvalid">${stats.pctValid}%</td>
+                <td id="p13_sum_estado"><b>${esc(stats.estadoDef)}</b></td>
               </tr>
               <tr>
                 <td><b>RESPUESTAS INCORRECTAS</b></td>
-                <td>${stats.incorrectas}</td>
-                <td>${stats.pctInc}%</td>
+                <td id="p13_sum_incorrectas">${stats.incorrectas}</td>
+                <td id="p13_sum_pctinc">${stats.pctInc}%</td>
                 <td>—</td>
               </tr>
             </tbody>
@@ -876,6 +916,10 @@
           }
         }
         trySetLS(k, v);
+
+        if (field === "pct") {
+          updateParte13SummaryLive(root, rowKey);
+        }
       };
 
       // prevenir doble bind
