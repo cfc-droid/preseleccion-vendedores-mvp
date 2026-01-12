@@ -4,14 +4,14 @@
     "input_columns_required": 35,
     "description": "Reglas oficiales de gates y scoring. FASE A2 (gates) + FASE B (scoring completo)."
   },
-"states": {
-  "discarded": "DESCARTADO_AUTO",
-  "review": "REVISAR_AUTO"
-},
-"thresholds": {
-  "discard_max": 69,
-  "review_min": 70
-},
+  "states": {
+    "discarded": "DESCARTADO_AUTO",
+    "review": "REVISAR_AUTO"
+  },
+  "thresholds": {
+    "discard_max": 69,
+    "review_min": 70
+  },
   "weights": {
     "filtros": 25,
     "experiencia": 15,
@@ -91,10 +91,42 @@
         "points": 10
       },
       {
+        "header": "4/33. Horas semanales reales",
+        "type": "map",
+        "points_map": {
+          "1-2": 0,
+          "1–2": 0,
+          "3–5": 1,
+          "6–10": 1,
+          "10+": 1
+        }
+      },
+      {
+        "header": "5/33. Conversaciones reales que podés iniciar en 7 días",
+        "type": "map",
+        "points_map": {
+          "0-5": 0,
+          "0–5": 0,
+          "6–15": 1,
+          "16–30": 1,
+          "30+": 1
+        }
+      },
+      {
         "header": "6/33. ¿Leíste completo el anuncio y la advertencia?",
         "type": "equals",
         "value": "Sí",
         "points": 5
+      },
+      {
+        "header": "25/33. ¿Alguna vez hiciste spam o te reportaron?",
+        "type": "map",
+        "points_map": {
+          "NO": 1,
+          "No": 1,
+          "Sí": 0,
+          "Si": 0
+        }
       }
     ],
     "experiencia": [
