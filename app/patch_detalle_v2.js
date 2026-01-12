@@ -5,6 +5,10 @@
 //   * Puntaje SOLO: "7,69%" o "0" (si hay respuesta)
 //   * Justificación SOLO: "OK porque ..." / "NO ES VALIDO porque ..."
 //   * Evaluación usando rules/rules_v1.json (gates/scoring por header)
+//
+// FIX (2026-01-12):
+// - NO pisa el Detalle nuevo de ui.js (PASO 2.4 + columnas Señales/Ética/Opinión).
+// - Si detecta el detalle nuevo => NO renderiza mock, NO oculta Paso 2.4.
 // =====================================================
 
 (() => {
@@ -69,6 +73,27 @@
   function toPctTxt(n) {
     const v = Math.round(Number(n) * 100) / 100;
     return v.toFixed(2).replace(".", ",") + "%";
+  }
+
+  // -------------------------
+  // Detectar si UI nueva ya renderizó PASO 2.4
+  // (si existe => NO renderizar mock, NO ocultar nada)
+  // -------------------------
+
+  function hasNewUIDetail(panel) {
+    // Señal 1: texto explícito "PASO 2.4 — Detalle por secciones"
+    const txt = norm(panel.textContent || "");
+    if (txt.includes("paso 2.4") && txt.includes("detalle por secciones")) return true;
+
+    // Señal 2: tabla Parte 1/3 con headers "Señales" "Ética" "Opinión"
+    const ths = [...panel.querySelectorAll("table thead th")].map(th => norm(th.textContent || ""));
+    const hasSignals = ths.some(t => t === "señales" || t.includes("señales"));
+    const hasEthics = ths.some(t => t === "ética" || t.includes("ética") || t.includes("etica"));
+    const hasOpinion = ths.some(t => t === "opinión" || t.includes("opinión") || t.includes("opinion"));
+
+    if (hasSignals && hasEthics && hasOpinion) return true;
+
+    return false;
   }
 
   // -------------------------
@@ -518,20 +543,6 @@
   }
 
   // -------------------------
-  // Ocultar bloque viejo "PASO 2.4"
-  // -------------------------
-
-  function hideOldPaso24(panel) {
-    const candidates = [...panel.querySelectorAll("div, p, span")];
-    const marker = candidates.find(el => norm(el.textContent || "").includes("paso 2.4"));
-    if (!marker) return;
-
-    const next = marker.nextElementSibling;
-    marker.style.display = "none";
-    if (next) next.style.display = "none";
-  }
-
-  // -------------------------
   // RowKey
   // -------------------------
 
@@ -549,9 +560,18 @@
     if (!panel) return;
     if (panel.style.display === "none") return;
 
+    // FIX: si UI nueva está presente, no tocar nada del detalle nuevo.
+    // (Dejamos el script cargado sin romper otras cosas.)
+    if (hasNewUIDetail(panel)) {
+      // Si existía un wrap viejo de este patch, lo retiramos para no duplicar.
+      const existingWrap = panel.querySelector(`#${WRAP_ID}`);
+      if (existingWrap) existingWrap.remove();
+      // No ocultar nada.
+      return;
+    }
+
     ensureInnerStyle();
     hideUselessCorrectIncorrectBoxes(panel);
-    hideOldPaso24(panel);
 
     const rowRaw = extractRowRaw(panel);
     if (!rowRaw) return;
