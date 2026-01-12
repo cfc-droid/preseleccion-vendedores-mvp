@@ -6,14 +6,12 @@
   },
 "states": {
   "discarded": "DESCARTADO_AUTO",
-  "review": "REVISAR_AUTO",
-  "approved": "APTO_AUTO"
-  },
-  "thresholds": {
-    "discard_max": 69,
-    "review_min": 70,
-    "approve_min": 85
-  },
+  "review": "REVISAR_AUTO"
+},
+"thresholds": {
+  "discard_max": 69,
+  "review_min": 70
+},
   "weights": {
     "filtros": 25,
     "experiencia": 15,
