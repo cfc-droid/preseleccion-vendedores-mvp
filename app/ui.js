@@ -3,6 +3,13 @@
 // tabla + filtros + detalle por fila
 // + pestañas: Resultados | Seleccionados | Historial
 // + export CSV + historial local
+//
+// ✅ NUEVO (TU PEDIDO - PARTE 1/3):
+// - En TABLA GENERAL: agrega columnas
+//   * RESULTADO DEFINITIVO (Parte 1/3 humano)
+//   * ESTADO DEFINITIVO (>=70 APROBADO / <70 NO VALIDO)
+// - Escucha evento psv:p13updated y re-render sin romper nada
+// - Export CSV incluye esas columnas
 // ======================================================
 
 window.UI = (() => {
@@ -11,6 +18,9 @@ window.UI = (() => {
 
   let currentTab = "RESULTADOS"; // RESULTADOS | SELECCIONADOS | HISTORIAL
   const LS_KEY = "cfc_preseleccion_history_v1";
+
+  // Parte 1/3 humano (localStorage) — misma key que patch_detalle_v2.js
+  const LS_P13_KEY = "cfc_preseleccion_p13_v1";
 
   // ======================================================
   // PASO 2.4 — Mapeo QID -> Header oficial (desde EXPECTED_HEADERS)
@@ -76,14 +86,7 @@ window.UI = (() => {
     return m;
   })();
 
-  function questionLabelFromHeader(h) {
-    // "12/33. bla" -> "Q12"
-    const num = headerNumber(h);
-    return num ? `Q${num}` : "";
-  }
-
   function questionTextFromHeader(h) {
-    // "12/33. Texto" -> "Texto"
     const s = canonHeader(h);
     return s.replace(/^\d+\/33\.\s*/, "");
   }
@@ -103,7 +106,6 @@ window.UI = (() => {
 
   // ======================================================
   // PARTE 2/3 — CERRADAS FIJAS (NO varía cantidad)
-  // 13 cerradas “core” (las que vos estás usando como resumen fijo)
   // ======================================================
 
   const Q_CERRADAS_FIXED = ["Q2","Q3","Q4","Q5","Q6","Q7","Q12","Q16","Q17","Q19","Q20","Q24","Q25"];
@@ -151,7 +153,6 @@ window.UI = (() => {
     }
 
     if (gate.type === "min_lines") {
-      // Cerradas no usan esto normalmente, pero lo soportamos igual.
       const lines = String(value ?? "").split("\n").map(x => x.trim()).filter(x => x.length >= (gate.min_chars_per_line || 1)).length;
       const ok = lines >= (gate.min_lines || 0);
       return { ok, why: ok ? `Líneas válidas: ${lines}` : (gate.reason || "No cumple mínimo") };
@@ -181,7 +182,6 @@ window.UI = (() => {
       return { ok, pts, why: ok ? "Suma puntos" : "0 pts" };
     }
 
-    // min_length, min_length_with_action son abiertas -> las ignoramos en Parte 2/3 cerradas
     return { ok: true, pts: 0, why: "—" };
   }
 
@@ -235,24 +235,11 @@ window.UI = (() => {
       let why = "Celda vacía";
       let pts = "0";
 
-      // REGLA BASE (TU PEDIDO):
-      // - vacío => NO OK => 0
-      // - OK => 7,69%
       if (!ansTrim.length) {
-        out.push({
-          idx: i + 1,
-          qid,
-          qtext,
-          ans: safeVal(ansRaw),
-          estado,
-          why,
-          pts
-        });
+        out.push({ idx: i + 1, qid, qtext, ans: safeVal(ansRaw), estado, why, pts });
         continue;
       }
 
-      // Si tiene respuesta, evaluamos según rules_v1.json:
-      // 1) Gate: si falla => NO OK
       const g = header ? gateByHeader[header] : null;
       if (g) {
         const evg = evalGateRule(g, ansRaw);
@@ -260,20 +247,11 @@ window.UI = (() => {
           estado = "INCORRECTA";
           why = evg.why;
           pts = "0";
-          out.push({
-            idx: i + 1,
-            qid,
-            qtext,
-            ans: safeVal(ansRaw),
-            estado,
-            why,
-            pts
-          });
+          out.push({ idx: i + 1, qid, qtext, ans: safeVal(ansRaw), estado, why, pts });
           continue;
         }
       }
 
-      // 2) Scoring: equals / map / contains_all define OK/NO OK
       const sr = header ? scoringByHeader[header] : null;
       if (sr && sr.r) {
         const evs = evalScoringRule(sr.r, ansRaw);
@@ -286,34 +264,15 @@ window.UI = (() => {
           why = sr.block ? `[${sr.block}] NO OK` : "NO OK";
           pts = "0";
         }
-
-        out.push({
-          idx: i + 1,
-          qid,
-          qtext,
-          ans: safeVal(ansRaw),
-          estado,
-          why,
-          pts
-        });
+        out.push({ idx: i + 1, qid, qtext, ans: safeVal(ansRaw), estado, why, pts });
         continue;
       }
 
-      // 3) Sin gate ni scoring:
-      // (Esto NO inventa nada: es exactamente Q16 “Sí/No OK; vacío NO OK”)
       estado = "CORRECTA";
       why = "OK";
       pts = PCT_OK;
 
-      out.push({
-        idx: i + 1,
-        qid,
-        qtext,
-        ans: safeVal(ansRaw),
-        estado,
-        why,
-        pts
-      });
+      out.push({ idx: i + 1, qid, qtext, ans: safeVal(ansRaw), estado, why, pts });
     }
 
     return out;
@@ -325,7 +284,6 @@ window.UI = (() => {
     const bad = rows.filter(r => r.estado === "INCORRECTA").length;
     const pctOk = total > 0 ? Math.round((ok / total) * 100) : 0;
 
-    // Estado informativo (no decide IA)
     let estadoInfo = "—";
     if (pctOk >= 70) estadoInfo = "APTO";
     else if (pctOk >= 50) estadoInfo = "REVISAR";
@@ -333,8 +291,6 @@ window.UI = (() => {
 
     return { total, ok, bad, pctOk, estadoInfo };
   }
-
-  // ======================================================
 
   function buildSectionQuestions(item) {
     const { Q_ALTA, Q_INFO } = getQLists();
@@ -345,7 +301,6 @@ window.UI = (() => {
     const setAlta = new Set(Q_ALTA);
     const setInfo = new Set(Q_INFO);
 
-    // OJO: Parte 2/3 cerradas FIJAS, así que acá no usamos dynamic.
     const Q_CERRADAS = allQ.filter(q => !setAlta.has(q) && !setInfo.has(q));
 
     const mkRows = (qids) => {
@@ -366,7 +321,6 @@ window.UI = (() => {
   }
 
   function renderQTable(title, rows) {
-    // TABLAS ABIERTAS/INFO: agregamos columnas útiles (Q / Pregunta / Respuesta / Largo)
     const t = `
       <div class="miniCard">
         <div class="sectionTitle">${escapeHtml(title)}</div>
@@ -398,7 +352,6 @@ window.UI = (() => {
   }
 
   function renderClosedFixedTables(title, rows, summary) {
-    // Parte 2/3: columnas completas y cantidad FIJA
     const t = `
       <div class="miniCard">
         <div class="sectionTitle">${escapeHtml(title)}</div>
@@ -543,6 +496,45 @@ window.UI = (() => {
   }
 
   // -------------------------
+  // Parte 1/3 definitivo (localStorage)
+  // -------------------------
+
+  function loadP13Store() {
+    try {
+      const raw = localStorage.getItem(LS_P13_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === "object") ? obj : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function getRowKeyFromResult(r) {
+    const rr = r?.rowRaw || {};
+    const mt = String(rr["Marca temporal"] ?? "").trim() || "—";
+    const em = String(rr["Dirección de correo electrónico"] ?? "").trim() || "—";
+    return `${mt}__${em}`;
+  }
+
+  function getP13Def(r) {
+    const store = loadP13Store();
+    const key = getRowKeyFromResult(r);
+    const row = store?.[key] || null;
+    if (!row) return { totalPct: "", estadoDef: "" };
+
+    // si el patch ya guardó total_pct/estado_def, lo usamos; sino calculamos rápido
+    const total = (row.total_pct !== undefined && row.total_pct !== null) ? Number(row.total_pct) : NaN;
+    const totalPct = isFinite(total) ? total : "";
+    const estadoDef = String(row.estado_def || "");
+
+    if (totalPct === "") return { totalPct: "", estadoDef: estadoDef || "" };
+
+    const pctTxt = `${Math.round(totalPct * 100) / 100}`.replace(".", ",") + "%";
+    const estado = estadoDef || (totalPct >= 70 ? "APROBADO" : "NO VALIDO");
+    return { totalPct: pctTxt, estadoDef: estado };
+  }
+
+  // -------------------------
   // Tabs
   // -------------------------
 
@@ -557,14 +549,11 @@ window.UI = (() => {
     viewSeleccionados.classList.toggle("hidden", tabId !== "SELECCIONADOS");
     viewHistorial.classList.toggle("hidden", tabId !== "HISTORIAL");
 
-    // filtros solo tiene sentido en RESULTADOS
     const filters = document.getElementById("filters");
     filters.classList.toggle("hidden", tabId !== "RESULTADOS");
 
-    // detalle lo ocultamos al cambiar de tab
     hideDetail();
 
-    // render por tab
     if (tabId === "RESULTADOS" && lastPayload) {
       renderFilters(lastPayload.results);
       renderTable(lastPayload.results);
@@ -702,19 +691,19 @@ window.UI = (() => {
     const correct = item.correct || [];
     const incorrect = item.incorrect || [];
 
-    // Row raw (para auditoría)
     const rawPretty = JSON.stringify(item.rowRaw || {}, null, 2);
 
     const eUI = estadoUI(item);
     const pendiente = item.pendiente_humano ? "SÍ" : "NO";
 
-    // PASO 2.4: separar Q por secciones
     const sections = buildSectionQuestions(item);
 
-    // Parte 2/3 FIX: cerradas fijas + evaluación usando rules_v1.json
     const RULES = await loadRulesOnce();
     const fixedClosedRows = buildFixedClosedRows(item, RULES || {});
     const fixedClosedSummary = buildClosedSummary(fixedClosedRows);
+
+    // Parte 1/3 definitivo desde localStorage
+    const p13 = getP13Def(item);
 
     panel.innerHTML = `
       <div class="row" style="margin-bottom:10px;">
@@ -729,6 +718,10 @@ window.UI = (() => {
 
         <div class="pill">Estado: <strong>${escapeHtml(eUI)}</strong></div>
         <div class="pill">Motivo: <strong>${escapeHtml(item.motivo || "—")}</strong></div>
+
+        <div class="pill">Resultado definitivo: <strong>${escapeHtml(p13.totalPct || "—")}</strong></div>
+        <div class="pill">Estado definitivo: <strong>${escapeHtml(p13.estadoDef || "—")}</strong></div>
+
         <div class="pill">Flags: <strong>${escapeHtml(flags)}</strong></div>
         <button class="btn" id="closeDetail">Cerrar detalle</button>
       </div>
@@ -760,9 +753,7 @@ window.UI = (() => {
   function renderTable(results) {
     const tableWrap = document.getElementById("resultsTable");
 
-    // ORDEN FIJO: por fila asc (antiguo -> nuevo), sin importar resultado
     const sorted = [...results].sort((a, b) => (a.fila - b.fila));
-
     const filtered = applyFilter(sorted);
 
     if (!filtered.length) {
@@ -782,6 +773,8 @@ window.UI = (() => {
       const { max, auto, hum, total, pct } = scoreParts(r);
       const pend = r.pendiente_humano ? "SÍ" : "NO";
 
+      const p13 = getP13Def(r);
+
       return `
         <tr data-fila="${r.fila}">
           <td>${r.fila}</td>
@@ -793,6 +786,10 @@ window.UI = (() => {
           <td>${escapeHtml(pend)}</td>
           <td>${estadoBadge}</td>
           <td>${motivo}</td>
+
+          <td><b>${escapeHtml(p13.totalPct || "—")}</b></td>
+          <td><b>${escapeHtml(p13.estadoDef || "—")}</b></td>
+
           <td>${flagsCount ? escapeHtml(String(flagsCount)) : "—"}</td>
           <td><a href="#" data-open="${r.fila}">Ver</a></td>
         </tr>
@@ -812,6 +809,10 @@ window.UI = (() => {
             <th>Pend</th>
             <th>Estado</th>
             <th>Motivo</th>
+
+            <th>RESULTADO DEFINITIVO</th>
+            <th>ESTADO DEFINITIVO</th>
+
             <th>Flags</th>
             <th>Detalle</th>
           </tr>
@@ -822,7 +823,6 @@ window.UI = (() => {
       </table>
     `;
 
-    // click en fila o en link "Ver"
     tableWrap.querySelectorAll("tr[data-fila]").forEach(tr => {
       tr.addEventListener("click", () => {
         const fila = Number(tr.getAttribute("data-fila"));
@@ -852,7 +852,7 @@ window.UI = (() => {
     const selected = results.filter(r => {
       const e = estadoUI(r);
       return e === "APTO" || e === "REVISAR" || e === "APTO_AUTO" || e === "REVISAR_AUTO";
-    }).sort((a, b) => (a.fila - b.fila)); // ORDEN FIJO por fila asc
+    }).sort((a, b) => (a.fila - b.fila));
 
     if (!selected.length) {
       el.innerHTML = `<div class="muted">No hay seleccionados (APTO/REVISAR) en esta carga.</div>`;
@@ -866,17 +866,19 @@ window.UI = (() => {
       const flags = (r.flags || []).length ? escapeHtml(r.flags.join(", ")) : "—";
       const pend = r.pendiente_humano ? "SÍ" : "NO";
 
-      // Checklist mínimo útil para decidir “le escribo o no”
       const okEmail = (r.email || "").includes("@");
       const social = (r.rowRaw?.["11/33. Perfil de red social principal"] || "");
       const okSocial = /(http|@)/.test(social);
+
+      const p13 = getP13Def(r);
 
       const checklist = [
         `${okEmail ? "✅" : "❌"} Email válido`,
         `${okSocial ? "✅" : "❌"} Perfil/red social parece válido`,
         `${pend === "SÍ" ? "⚠️" : "✅"} Pendiente humano: ${pend}`,
         `${(r.correct || []).length ? "✅" : "⚠️"} Cumplimientos detectados`,
-        `${(r.incorrect || []).length ? "⚠️" : "✅"} Incumplimientos`
+        `${(r.incorrect || []).length ? "⚠️" : "✅"} Incumplimientos`,
+        `${p13.estadoDef === "APROBADO" ? "✅" : (p13.estadoDef ? "⚠️" : "—")} Estado definitivo (Parte 1/3): ${p13.estadoDef || "—"}`
       ];
 
       const progress = `
@@ -952,12 +954,11 @@ window.UI = (() => {
   }
 
   function saveHistory(entries) {
-    localStorage.setItem(LS_KEY, JSON.stringify(entries.slice(0, 30))); // max 30 corridas
+    localStorage.setItem(LS_KEY, JSON.stringify(entries.slice(0, 30)));
   }
 
   function pushHistory(run) {
     const hist = loadHistory();
-    // dedupe por runId
     const next = [run, ...hist.filter(x => x.runId !== run.runId)];
     saveHistory(next);
   }
@@ -1017,7 +1018,6 @@ window.UI = (() => {
         const item = loadHistory().find(x => x.runId === runId);
         if (!item) return;
 
-        // Rehidratar “payload”
         lastPayload = {
           results: item.results || [],
           version: item.version || "—",
@@ -1037,7 +1037,6 @@ window.UI = (() => {
 
   function toCSVCell(v) {
     const s = String(v ?? "");
-    // escapado CSV básico
     if (/[",\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
     return s;
   }
@@ -1048,14 +1047,22 @@ window.UI = (() => {
       return;
     }
 
-    // CSV con columnas nuevas (Auto/Hum/Total/Pendiente)
-    const cols = ["fila", "nombre", "email", "score_auto", "score_humano", "score_total", "maxScore", "percent", "pendiente_humano", "estado", "motivo", "flags"];
+    // ✅ NUEVO: Resultado definitivo + Estado definitivo
+    const cols = [
+      "fila","nombre","email",
+      "score_auto","score_humano","score_total","maxScore","percent","pendiente_humano",
+      "estado","motivo",
+      "resultado_definitivo","estado_definitivo",
+      "flags"
+    ];
+
     const lines = [];
     lines.push(cols.join(","));
 
     for (const r of lastPayload.results) {
       const { max, auto, hum, total, pct } = scoreParts(r);
       const eUI = estadoUI(r);
+      const p13 = getP13Def(r);
 
       const row = [
         r.fila,
@@ -1069,6 +1076,8 @@ window.UI = (() => {
         r.pendiente_humano ? "SI" : "NO",
         eUI,
         r.motivo || "",
+        p13.totalPct || "",
+        p13.estadoDef || "",
         (r.flags || []).join("|")
       ].map(toCSVCell).join(",");
 
@@ -1107,7 +1116,6 @@ window.UI = (() => {
     renderTable(payload.results);
     hideDetail();
 
-    // push historial
     try {
       const c = counts(payload.results);
       pushHistory({
@@ -1122,14 +1130,11 @@ window.UI = (() => {
       });
     } catch (_) {}
 
-    // mantiene pestaña actual (si estabas en otra, la respeta)
     setTab(currentTab);
 
-    // precarga rules (best effort, no rompe si falla)
     loadRulesOnce();
   }
 
-  // Init botones top
   function bindTopButtons() {
     const btnCSV = document.getElementById("btnExportCSV");
     const btnClear = document.getElementById("btnClearHistory");
@@ -1138,10 +1143,26 @@ window.UI = (() => {
     if (btnClear) btnClear.addEventListener("click", clearHistory);
   }
 
-  // Se llama cuando carga el script
+  // ✅ NUEVO: refrescar tabla cuando cambia Parte 1/3 humano
+  function bindP13Refresh() {
+    window.addEventListener("psv:p13updated", () => {
+      if (!lastPayload) return;
+      // Mantener tab actual y filtros; solo re-render de lo visible.
+      if (currentTab === "RESULTADOS") {
+        renderFilters(lastPayload.results);
+        renderTable(lastPayload.results);
+      }
+      if (currentTab === "SELECCIONADOS") {
+        renderSelected(lastPayload.results);
+      }
+      // si hay detalle abierto, no lo tocamos (el patch lo vuelve a pintar cuando corresponde)
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     renderTopTabs();
     bindTopButtons();
+    bindP13Refresh();
     setTab("RESULTADOS");
   });
 
