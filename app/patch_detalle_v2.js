@@ -18,7 +18,6 @@
 
   // LocalStorage (Parte 1/3 editable)
   const LS_PREFIX_P13 = "p13_edit_v2";
-  const LS_PREFIX_P13_SNAPSHOT = "p13_snapshot_v1";
 
   // -------------------------
   // Helpers
@@ -36,6 +35,10 @@
   function safeVal(v) {
     const s = String(v ?? "").trim();
     return s.length ? s : "—";
+  }
+
+  function isBlank(v) {
+    return !String(v ?? "").trim().length;
   }
 
   function norm(s) {
@@ -77,19 +80,6 @@
     return v.toFixed(2).replace(".", ",") + "%";
   }
 
-  function pctTxtToNumber(p) {
-    const s = String(p ?? "").trim();
-    if (!s.length || s === "0") return 0;
-    const cleaned = s.replace("%", "").replace(",", ".").trim();
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  }
-
-  function numberToPctTxt(n) {
-    const v = Math.round(Number(n) * 100) / 100;
-    return v.toFixed(2).replace(".", ",") + "%";
-  }
-
   function tryGetLS(k) {
     try { return localStorage.getItem(k); } catch (_) { return null; }
   }
@@ -100,16 +90,6 @@
 
   function lsKeyP13(rowKey, qid, field) {
     return `${LS_PREFIX_P13}__${rowKey}__${qid}__${field}`;
-  }
-
-  function lsKeyP13Snapshot(rowKey, field) {
-    return `${LS_PREFIX_P13_SNAPSHOT}__${rowKey}__${field}`;
-  }
-
-  function nowTS() {
-    const d = new Date();
-    const pad = (x) => String(x).padStart(2, "0");
-    return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
   // -------------------------
@@ -172,7 +152,7 @@
   const Q_INFO = ["Q8","Q10","Q11","Q26","Q28","Q29","Q32","Q33"];
 
   // -------------------------
-  // Extraer rowRaw del DOM
+  // Extraer rowRaw + listas del DOM
   // -------------------------
 
   function extractRowRaw(panel) {
@@ -188,6 +168,15 @@
     } catch (_) {
       return null;
     }
+  }
+
+  function extractList(panel, titleIncludes) {
+    const cards = [...panel.querySelectorAll(".miniCard")];
+    const card = cards.find(c => (c.querySelector(".sectionTitle")?.textContent || "").includes(titleIncludes));
+    if (!card) return [];
+    return [...card.querySelectorAll("ul.list li")]
+      .map(li => (li.textContent || "").trim())
+      .filter(Boolean);
   }
 
   function hideUselessCorrectIncorrectBoxes(panel) {
@@ -242,41 +231,6 @@
         padding: 8px 10px;
         border-radius: 10px;
         outline: none;
-      }
-
-      /* Resumen Parte 1/3 */
-      #${WRAP_ID} .p13bar{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:12px;
-        flex-wrap:wrap;
-        margin-top:10px;
-      }
-      #${WRAP_ID} .p13btn{
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.12);
-        color: inherit;
-        padding: 8px 12px;
-        border-radius: 12px;
-        cursor: pointer;
-        user-select:none;
-      }
-      #${WRAP_ID} .p13btn:hover{
-        background: rgba(255,255,255,0.08);
-      }
-      #${WRAP_ID} .p13saved{
-        opacity: 0.85;
-        font-size: 12px;
-      }
-      #${WRAP_ID} .p13pill{
-        display:inline-block;
-        padding: 4px 10px;
-        border-radius: 999px;
-        border: 1px solid rgba(255,255,255,0.12);
-        background: rgba(255,255,255,0.04);
-        font-weight: 700;
-        letter-spacing: .2px;
       }
     `;
     document.head.appendChild(st);
@@ -488,7 +442,7 @@
       const mustPhrase = normalizeText("Entiendo que este modelo NO es un empleo y cobro solo por resultados");
       const hasPhrase = t.includes(mustPhrase);
       const hasAt = /@\w+/.test(a);
-      const hasCity = a.split("—").length >= 3 || a.split("-").length >= 3 || /\b(ciudad|buenos aires|caba|rosario|cordoba|córdoba|mendoza|la plata|mar del plata)\b/i.test(a);
+      const hasCity = a.split("—").length >= 3 || a.split("-").length >= 3 || /\b(ciudad|buenos aires|caba|rosario|cordoba|mendoza|la plata|mar del plata)\b/i.test(a);
 
       if (hasPhrase && hasAt && hasCity) {
         signals.push("✔ Respuesta VÁLIDA");
@@ -535,6 +489,7 @@
         signals.push("✔ Respuesta VÁLIDA");
         signals.push("Menciona productos concretos");
         if (promise) {
+          // si prometió ganancias acá, ética manda
           return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
         }
         return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
@@ -625,7 +580,7 @@
     // Q22
     if (qid === "Q22") {
       const hasNumbers = /\d/.test(a);
-      const okEthic = /(depende|esfuerzo|resultados|no puedo prometer|no garantizo|no hay garantias|no hay garantías)/i.test(a) && !hasNumbers && !promise;
+      const okEthic = /(depende|esfuerzo|resultados|no puedo prometer|no garantizo|no hay garantias)/i.test(a) && !hasNumbers && !promise;
 
       if (okEthic) {
         signals.push("✔ Respuesta VÁLIDA");
@@ -633,6 +588,7 @@
         return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
       }
 
+      // si hay promesa/garantía/números -> ética fuerte
       if (promise || hasNumbers || /(asegur|garant|fijo)/i.test(a)) {
         signals.push("❌ Respuesta INCORRECTA");
         signals.push("Promete o sugiere resultados/cifras");
@@ -648,8 +604,8 @@
     // --------
     // Q23
     if (qid === "Q23") {
-      const ok = containsAny(a, ["no promesas", "no prometer", "no dinero facil", "no dinero fácil", "no garantias", "no garantías", "no garantía", "no retorno", "no resultados garantizados", "sin promesas"]);
-      const bad = promise || containsAny(a, ["te aseguro", "garantizo", "gana seguro", "dinero rapido", "dinero rápido"]);
+      const ok = containsAny(a, ["no promesas", "no prometer", "no dinero facil", "no garantias", "no garantía", "no retorno", "no resultados garantizados", "sin promesas"]);
+      const bad = promise || containsAny(a, ["te aseguro", "garantizo", "gana seguro", "dinero rapido"]);
 
       if (ok && !bad) {
         signals.push("✔ Respuesta VÁLIDA");
@@ -673,7 +629,7 @@
     // Q27
     if (qid === "Q27") {
       const tooShort = a.length < 40;
-      const bad = promise || containsAny(a, ["garant", "asegur", "dinero rapido", "dinero rápido", "gana ya"]);
+      const bad = promise || containsAny(a, ["garant", "asegur", "dinero rapido", "gana ya"]);
       const ok = !tooShort && !bad;
 
       if (ok) {
@@ -715,7 +671,7 @@
     // Q31
     if (qid === "Q31") {
       const tooShort = a.length < 20;
-      const ego = containsAny(a, ["soy el mejor", "soy el numero 1", "soy el número 1", "nadie como yo", "soy perfecto", "soy el mas", "soy el más"]);
+      const ego = containsAny(a, ["soy el mejor", "soy el numero 1", "nadie como yo", "soy perfecto", "soy el mas"]);
       const ok = !tooShort && !ego;
 
       if (ok) {
@@ -730,68 +686,13 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // fallback
+    // fallback (no debería pasar)
     signals.push("✔ Respuesta con contenido");
     return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
   }
 
   // -------------------------
-  // Parte 1/3 — Total / Estado (tiempo real)
-  // -------------------------
-
-  function computeP13Total(rowKey) {
-    const pctFixedTxt = pctFixed(1, 12); // "8,33%"
-    let sum = 0;
-
-    for (const qid of Q_ABIERTAS_ALTA) {
-      const v = tryGetLS(lsKeyP13(rowKey, qid, "pct")) ?? "0";
-      if (String(v) === String(pctFixedTxt)) sum += pctTxtToNumber(pctFixedTxt);
-      else sum += 0;
-    }
-
-    // Mantener 2 decimales consistentes
-    sum = Math.round(sum * 100) / 100;
-
-    const estado = sum >= 70 ? "APROBADO" : "NO VALIDO";
-    return { sum, sumTxt: numberToPctTxt(sum), estado, pctFixedTxt };
-  }
-
-  function updateP13Summary(root, rowKey) {
-    if (!root) return;
-    const totalEl = root.querySelector('[data-p13-sum="total"]');
-    const estadoEl = root.querySelector('[data-p13-sum="estado"]');
-    if (!totalEl && !estadoEl) return;
-
-    const r = computeP13Total(rowKey);
-    if (totalEl) totalEl.textContent = r.sumTxt;
-    if (estadoEl) estadoEl.textContent = r.estado;
-  }
-
-  function bindP13SaveButton(root, rowKey) {
-    if (!root) return;
-    const btn = root.querySelector("[data-p13-save]");
-    const saved = root.querySelector("[data-p13-saved]");
-    if (!btn) return;
-
-    if (btn.getAttribute("data-p13-bound") === "1") return;
-    btn.setAttribute("data-p13-bound", "1");
-
-    btn.addEventListener("click", () => {
-      const r = computeP13Total(rowKey);
-      trySetLS(lsKeyP13Snapshot(rowKey, "total"), r.sumTxt);
-      trySetLS(lsKeyP13Snapshot(rowKey, "estado"), r.estado);
-      trySetLS(lsKeyP13Snapshot(rowKey, "ts"), nowTS());
-
-      if (saved) {
-        const ts = tryGetLS(lsKeyP13Snapshot(rowKey, "ts")) || nowTS();
-        saved.textContent = `Guardado ✓ ${ts}`;
-      }
-    });
-  }
-
-  // -------------------------
   // Render Parte 1/3 (ABIERTAS ALTA)
-  // - Resumen arriba (tipo imagen 5) con % en tiempo real + estado definitivo
   // - 3 columnas automáticas por regla de pregunta
   // - 2 columnas editables (observación + porcentaje 0/8,33)
   // -------------------------
@@ -799,9 +700,6 @@
   async function renderParte13(rowRaw, rowKey) {
     const pctFixedTxt = pctFixed(1, 12); // "8,33%"
     const aux = await loadAuxOnce();
-
-    const snapTs = tryGetLS(lsKeyP13Snapshot(rowKey, "ts")) || "";
-    const snapLabel = snapTs ? `Guardado ✓ ${snapTs}` : "";
 
     const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
@@ -861,48 +759,7 @@
       `;
     }).join("");
 
-    const initial = computeP13Total(rowKey);
-
     return `
-      <div class="miniCard" style="margin-top:14px;">
-        <div class="sectionTitle">RESUMEN — PARTE 1/3</div>
-
-        <div style="overflow:auto; margin-top:10px;">
-          <table class="table">
-            <thead>
-              <tr>
-                <th style="min-width:260px;">RESUMEN — ABIERTAS (12)</th>
-                <th style="width:100px;">UNIDAD</th>
-                <th style="width:140px;">PORCENTAJE</th>
-                <th style="width:220px;">ESTADO DEFINITIVO</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><b>TOTAL DE PREGUNTAS</b></td>
-                <td>12</td>
-                <td>100%</td>
-                <td>—</td>
-              </tr>
-              <tr>
-                <td><b>RESULTADO DEFINITIVO</b> (suma de tu columna “PORCENTAJE”)</td>
-                <td>—</td>
-                <td><span class="p13pill" data-p13-sum="total">${esc(initial.sumTxt)}</span></td>
-                <td><span class="p13pill" data-p13-sum="estado">${esc(initial.estado)}</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="p13bar">
-          <div class="muted">Regla Parte 1/3 (MANUAL): ≥70% = APROBADO | &lt;70% = NO VALIDO.</div>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <button class="p13btn" type="button" data-p13-save="1">Guardar</button>
-            <span class="p13saved" data-p13-saved>${esc(snapLabel)}</span>
-          </div>
-        </div>
-      </div>
-
       <div class="miniCard" style="margin-top:14px;">
         <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
         <div style="overflow:auto; margin-top:10px;">
@@ -910,7 +767,7 @@
             <thead>
               <tr>
                 <th style="width:60px;">N°</th>
-                <th style="width:320px;">12 PREGUNTAS “ABIERTAS” — PRIOR (FQ) ALTA</th>
+                <th style="width:320px;">12 PREGUNTAS “ABIERTAS” — PRIORIDAD ALTA</th>
                 <th style="width:360px;">RESPUESTA DEL VENDEDOR</th>
                 <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
                 <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
@@ -937,8 +794,7 @@
       const k = lsKeyP13(rowKey, qid, field);
 
       const handler = () => {
-        const v = String(el.value ?? "");
-
+        const v = (el.tagName === "SELECT") ? String(el.value ?? "") : String(el.value ?? "");
         // pct solo 0 o 8,33%
         if (field === "pct") {
           const allowedA = "0";
@@ -946,17 +802,10 @@
           if (v !== allowedA && v !== allowedB) {
             el.value = allowedA;
             trySetLS(k, allowedA);
-            const wrap = el.closest(`#${WRAP_ID}`) || root;
-            updateP13Summary(wrap, rowKey);
             return;
           }
         }
-
         trySetLS(k, v);
-
-        // Update en tiempo real (resumen Parte 1/3)
-        const wrap = el.closest(`#${WRAP_ID}`) || root;
-        updateP13Summary(wrap, rowKey);
       };
 
       // prevenir doble bind
@@ -1146,10 +995,8 @@
     const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
     const existingWrap = panel.querySelector(`#${WRAP_ID}`);
     if (prevKey === rowKey && existingWrap) {
-      // Igual key, pero aseguro bind + update (por si el DOM se re-creó)
+      // Igual key, pero aseguro bind de editores (por si el DOM se re-creó)
       bindParte13Editors(existingWrap);
-      bindP13SaveButton(existingWrap, rowKey);
-      updateP13Summary(existingWrap, rowKey);
       return;
     }
 
@@ -1175,10 +1022,8 @@
     jsonDiv.parentNode.insertBefore(wrap, jsonDiv);
     panel.setAttribute(PATCH_KEY_ATTR, rowKey);
 
-    // Bind editores Parte 1/3 + resumen realtime + guardar
+    // Bind editores Parte 1/3
     bindParte13Editors(wrap);
-    bindP13SaveButton(wrap, rowKey);
-    updateP13Summary(wrap, rowKey);
   }
 
   // -------------------------
@@ -1197,10 +1042,5 @@
     patch(panel);
   }
 
-  // FIX CLAVE: si el script carga DESPUÉS de DOMContentLoaded, igual inicializa
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  document.addEventListener("DOMContentLoaded", init);
 })();
