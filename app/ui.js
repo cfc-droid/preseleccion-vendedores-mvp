@@ -597,7 +597,7 @@ window.UI = (() => {
           ${mkBtn("DESCARTADO", `DESCARTADO (${c.descartado})`)}
         </div>
 
-        <div class="pill">Orden: <strong>Score total desc</strong></div>
+        <div class="pill">Orden: <strong>Fila asc</strong></div>
       </div>
     `;
 
@@ -710,12 +710,8 @@ window.UI = (() => {
   function renderTable(results) {
     const tableWrap = document.getElementById("resultsTable");
 
-    // orden score total desc, y si empatan, por fila asc
-    const sorted = [...results].sort((a, b) => {
-      const sa = Number(a.score_total ?? a.score ?? 0);
-      const sb = Number(b.score_total ?? b.score ?? 0);
-      return (sb - sa) || (a.fila - b.fila);
-    });
+    // ORDEN FIJO: por fila asc (antiguo -> nuevo), sin importar resultado
+    const sorted = [...results].sort((a, b) => (a.fila - b.fila));
 
     const filtered = applyFilter(sorted);
 
@@ -806,11 +802,7 @@ window.UI = (() => {
     const selected = results.filter(r => {
       const e = estadoUI(r);
       return e === "APTO" || e === "REVISAR" || e === "APTO_AUTO" || e === "REVISAR_AUTO";
-    }).sort((a, b) => {
-      const sa = Number(a.score_total ?? a.score ?? 0);
-      const sb = Number(b.score_total ?? b.score ?? 0);
-      return (sb - sa) || (a.fila - b.fila);
-    });
+    }).sort((a, b) => (a.fila - b.fila)); // ORDEN FIJO por fila asc
 
     if (!selected.length) {
       el.innerHTML = `<div class="muted">No hay seleccionados (APTO/REVISAR) en esta carga.</div>`;
