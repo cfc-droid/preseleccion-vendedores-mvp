@@ -1,13 +1,11 @@
 // =====================================================
-// PATCH DETALLE V3 — ORDEN + COLUMNAS CORRECTAS (SIN TOCAR UI)
+// PATCH DETALLE V3 — FIX UI (SIN TOCAR ui.js / app.js)
 // =====================================================
-// - NO toca ui.js ni app.js
-// - Remueve restos del Patch V2 si existen (#detalleV2_wrap/#detalleV2_style)
-// - Oculta SOLO la PARTE 1/3 vieja (original), NO toca Parte 2/3 ni Parte 3/3
-// - Inserta Parte 1/3 NUEVA antes de la Parte 2/3 (orden correcto: 1/3 -> 2/3 -> 3/3 -> JSON)
-// - Mantiene 8 columnas estilo mock
-// - Humano editable: Observación + Porcentaje (0 o 8.33)
-// - Guardado en localStorage por fila + pregunta
+// FIXES:
+// 1) Oculta las 2 cajas "Respuestas/condiciones CORRECTAS" y "INCORRECTAS (por qué)"
+// 2) Evita que se "estire" a la derecha + fuerza barras (scroll) donde corresponde
+// 3) Parte 2/3: primero resumen chico, luego tabla 13 preguntas (reorden DOM original)
+// 4) Parte 3/3: oculta columna "Largo"
 // =====================================================
 
 (() => {
@@ -138,7 +136,20 @@
     });
   };
 
-  // Encuentra la tarjeta de Parte 2/3 (ancla estable para insertar antes)
+  // Oculta las 2 cajas que sobran (Correctas / Incorrectas)
+  const hideCorrectIncorrectBoxes = panel => {
+    panel.querySelectorAll(".miniCard").forEach(c => {
+      const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
+      if (
+        t.includes("respuestas/condiciones correctas") ||
+        t.includes("respuestas/condiciones incorrectas")
+      ) {
+        c.style.display = "none";
+      }
+    });
+  };
+
+  // Encuentra la tarjeta de Parte 2/3
   const findParte23Card = panel => {
     const cards = [...panel.querySelectorAll(".miniCard")];
     return cards.find(c => {
@@ -147,13 +158,46 @@
     }) || null;
   };
 
-  /* ================= STYLES ================= */
+  // Encuentra la tarjeta de Parte 3/3
+  const findParte33Card = panel => {
+    const cards = [...panel.querySelectorAll(".miniCard")];
+    return cards.find(c => {
+      const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
+      return t.startsWith("parte 3/3");
+    }) || null;
+  };
+
+  /* ================= STYLES (FIX STRETCH + SCROLL) ================= */
 
   const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return;
     const s = document.createElement("style");
     s.id = STYLE_ID;
+
+    // IMPORTANTES:
+    // - #detailPanel antes tenía white-space: pre-wrap en index.html y eso rompe tablas/ancho.
+    // - Forzamos normal + word-break para que nada empuje el layout a la derecha.
+    // - Forzamos overflow en wrappers para que aparezcan barras.
     s.textContent = `
+      /* Evitar "estirado a la derecha" dentro del detalle */
+      #${DETAIL_ID}{
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-x: hidden;
+      }
+
+      /* Si algo se pasa, que el SCROLL lo tenga el contenedor interno */
+      #${DETAIL_ID} .miniCard{
+        max-width: 100% !important;
+      }
+
+      /* Wrapper de tablas: barras */
+      #${DETAIL_ID} .miniCard > div[style*="overflow"]{
+        overflow: auto !important;
+        max-width: 100% !important;
+      }
+
+      /* Nuestros inputs humanos */
       #${WRAP_ID}, #${WRAP_ID} *{
         font-family: var(--font, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial) !important;
         white-space: normal !important;
@@ -167,7 +211,10 @@
         border:1px solid var(--border);
         color:var(--text);
       }
-      #${WRAP_ID} .table{ table-layout: fixed; width:100%; }
+      #${WRAP_ID} .table{
+        table-layout: fixed;
+        width:100%;
+      }
       #${WRAP_ID} th, #${WRAP_ID} td{
         overflow-wrap:anywhere;
         word-break:break-word;
@@ -241,7 +288,7 @@
     return s === PCT_ALLOWED ? PCT_ALLOWED : "0";
   };
 
-  /* ================= RENDER ================= */
+  /* ================= RENDER PARTE 1/3 (NUEVA) ================= */
 
   const renderParte13 = async row => {
     const OPEN = await loadOpen();
@@ -307,7 +354,6 @@
       const k = tr.getAttribute("data-k");
       const ta = tr.querySelector("textarea");
       const ip = tr.querySelector("input");
-
       if (!ta || !ip) return;
 
       const save = () => {
@@ -322,15 +368,80 @@
     });
   };
 
+  /* ================= FIX PARTE 2/3 ORDER ================= */
+  // Objetivo: dentro de la miniCard Parte 2/3, mover el resumen (TOTAL/VALIDAS/INCORRECTAS)
+  // arriba, antes de la tabla de 13 preguntas.
+  const fixParte23Order = panel => {
+    const card = findParte23Card(panel);
+    if (!card) return;
+
+    // Buscamos el bloque (table o contenedor) que contenga "TOTAL DE PREGUNTAS"
+    const candidates = [...card.querySelectorAll("table, div")];
+
+    const resumenNode = candidates.find(n => {
+      const t = norm(n.textContent || "");
+      return t.includes("total de preguntas") && t.includes("respuestas válidas");
+    });
+
+    if (!resumenNode) return;
+
+    // El resumen puede estar dentro de un div contenedor. Subimos al contenedor más razonable:
+    let resumenBlock = resumenNode;
+    // si es table, ideal es mover su wrapper div (el que tiene overflow o padding)
+    if (resumenBlock.tagName === "TABLE") {
+      const up = resumenBlock.closest("div");
+      if (up && up !== card) resumenBlock = up;
+    }
+
+    // Insertar al principio del contenido de la card (justo después del título)
+    const title = card.querySelector(".sectionTitle");
+    if (!title) return;
+
+    // Evitar reorden infinito: si ya está arriba, no hacemos nada
+    const firstAfterTitle = title.nextElementSibling;
+    if (firstAfterTitle === resumenBlock) return;
+
+    card.insertBefore(resumenBlock, firstAfterTitle);
+  };
+
+  /* ================= FIX PARTE 3/3 HIDE "LARGO" ================= */
+  const hideParte33LargoColumn = panel => {
+    const card = findParte33Card(panel);
+    if (!card) return;
+
+    const table = card.querySelector("table");
+    if (!table) return;
+
+    const ths = [...table.querySelectorAll("thead th")];
+    const idx = ths.findIndex(th => norm(th.textContent || "") === "largo");
+    if (idx < 0) return;
+
+    // Ocultar TH
+    ths[idx].style.display = "none";
+
+    // Ocultar TDs de ese índice en cada fila
+    table.querySelectorAll("tbody tr").forEach(tr => {
+      const tds = [...tr.children];
+      if (tds[idx]) tds[idx].style.display = "none";
+    });
+  };
+
   /* ================= PATCH ================= */
 
   const patch = async panel => {
     if (!panel || panel.style.display === "none") return;
 
     ensureStyle();
-
-    // Evitar mezcla con v2
     removeV2IfExists(panel);
+
+    // (1) Ocultar 2 cuadros de más
+    hideCorrectIncorrectBoxes(panel);
+
+    // (4) Ocultar "Largo" en Parte 3/3 (original)
+    hideParte33LargoColumn(panel);
+
+    // (3) Reordenar Parte 2/3 (original)
+    fixParte23Order(panel);
 
     // Ocultar solo la Parte 1/3 vieja
     hideOldParte13Only(panel);
@@ -346,9 +457,8 @@
     // Remover nuestro wrap anterior
     panel.querySelector(`#${WRAP_ID}`)?.remove();
 
-    // Render
+    // Render Parte 1/3 nueva
     const html = await renderParte13(row);
-
     const tmp = document.createElement("div");
     tmp.innerHTML = html;
     const node = tmp.firstElementChild;
@@ -359,7 +469,7 @@
     if (parte23 && parte23.parentNode) {
       parte23.parentNode.insertBefore(node, parte23);
     } else {
-      // Fallback ultra seguro: si no se encuentra Parte 2/3, insertar antes del JSON
+      // fallback: antes del JSON
       const divs = [...panel.querySelectorAll("div")];
       const jsonDiv = divs.find(d =>
         (d.textContent || "").trim().startsWith("{") &&
@@ -371,6 +481,11 @@
 
     panel.setAttribute(PATCH_KEY, key);
     bindHuman(panel);
+
+    // Re-aplicar por si el DOM cambió al insertar
+    hideCorrectIncorrectBoxes(panel);
+    hideParte33LargoColumn(panel);
+    fixParte23Order(panel);
   };
 
   const init = () => {
