@@ -1,16 +1,16 @@
 // =====================================================
 // PATCH DETALLE V2 (SIN TOCAR ui.js)
-// - Rehace las 3 partes del detalle con el nivel del mock
-// - Usa SOLO el DOM ya renderizado por ui.js:
-//   * Lee rowRaw (JSON visible al final del detalle)
-//   * Lee listas CORRECTAS/INCORRECTAS (ULs existentes)
-// - No toca scoring, gates, reglas. Solo PRESENTACIÓN.
+// - Renderiza 3 partes del detalle estilo mock
+// - Parte 2/3 (13 cerradas):
+//   * Puntaje SOLO: "7,69%" o "0" (si hay respuesta)
+//   * Justificación SOLO: "OK porque ..." / "NO ES VALIDO porque ..."
+//   * Evaluación usando rules/rules_v1.json (gates/scoring por header)
 // =====================================================
 
 (() => {
   const DETAIL_ID = "detailPanel";
 
-  const PATCH_KEY_ATTR = "data-patched-v2-key"; // clave por fila (NO booleano)
+  const PATCH_KEY_ATTR = "data-patched-v2-key";
   const WRAP_ID = "detalleV2_wrap";
   const STYLE_ID = "detalleV2_style";
 
@@ -56,6 +56,19 @@
   function pctFixed(_n, total) {
     const v = total > 0 ? (100 / total) : 0;
     return (Math.round(v * 100) / 100).toFixed(2).replace(".", ",") + "%";
+  }
+
+  function normalizeText(text) {
+    return String(text || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  function toPctTxt(n) {
+    const v = Math.round(Number(n) * 100) / 100;
+    return v.toFixed(2).replace(".", ",") + "%";
   }
 
   // -------------------------
@@ -145,19 +158,149 @@
       .filter(Boolean);
   }
 
-  // Ocultar SIEMPRE los 2 cuadros inútiles
   function hideUselessCorrectIncorrectBoxes(panel) {
     const cards = [...panel.querySelectorAll(".miniCard")];
     for (const c of cards) {
       const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
-      if (
-        t.includes("respuestas/condiciones correctas") ||
-        t.includes("respuestas/condiciones incorrectas")
-      ) {
+      if (t.includes("respuestas/condiciones correctas") || t.includes("respuestas/condiciones incorrectas")) {
         c.style.display = "none";
       }
     }
   }
+
+  // -------------------------
+  // Estilos internos
+  // -------------------------
+
+  function ensureInnerStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const st = document.createElement("style");
+    st.id = STYLE_ID;
+
+    st.textContent = `
+      #${WRAP_ID}, #${WRAP_ID} *{
+        font-family: var(--font, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial) !important;
+        white-space: normal !important;
+      }
+      #${WRAP_ID} .table{ table-layout: fixed; width:100%; }
+      #${WRAP_ID} th, #${WRAP_ID} td{
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      #${WRAP_ID} td:nth-child(3){ max-width: 520px; }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // -------------------------
+  // Cargar rules una vez
+  // -------------------------
+
+  let _RULES_CACHE = null;
+
+  async function loadRulesOnce() {
+    if (_RULES_CACHE) return _RULES_CACHE;
+    try {
+      const res = await fetch("rules/rules_v1.json");
+      if (!res.ok) throw new Error(`No se pudo cargar rules_v1.json (HTTP ${res.status})`);
+      _RULES_CACHE = await res.json();
+      return _RULES_CACHE;
+    } catch (e) {
+      console.error(e);
+      _RULES_CACHE = null;
+      return null;
+    }
+  }
+
+  function getGateByHeader(RULES, header) {
+    const gates = Array.isArray(RULES?.gates) ? RULES.gates : [];
+    return gates.find(g => g && g.header === header) || null;
+  }
+
+  function getScoringRuleByHeader(RULES, header) {
+    const scoring = RULES?.scoring || {};
+    for (const [block, ruleset] of Object.entries(scoring)) {
+      if (block === "canales" && ruleset && Array.isArray(ruleset.rules)) {
+        for (const r of ruleset.rules) {
+          if (r?.header === header) return { block, r };
+        }
+        continue;
+      }
+      if (Array.isArray(ruleset)) {
+        for (const r of ruleset) {
+          if (r?.header === header) return { block, r };
+        }
+      }
+    }
+    return null;
+  }
+
+  function evalGateSimple(gate, value) {
+    if (!gate || !gate.type) return { ok: true };
+
+    if (gate.type === "equals") {
+      const ok = String(value ?? "") !== String(gate.value ?? "");
+      return { ok, why: ok ? "Cumple" : (gate.reason || "No cumple") };
+    }
+
+    if (gate.type === "contains_all") {
+      const normv = normalizeText(value);
+      const ok = (gate.value || []).every(v => normv.includes(normalizeText(v)));
+      return { ok, why: ok ? "Aceptó reglas" : (gate.reason || "No acepta todas las reglas") };
+    }
+
+    return { ok: true, why: "Cumple" };
+  }
+
+  function evalClosedOkByRules(RULES, header, answer) {
+    const a = String(answer ?? "").trim();
+    if (!a) return { hasAnswer: false, isOk: false, whyCore: "" };
+
+    // 1) Gate (si falla => NO válido)
+    const g = getGateByHeader(RULES, header);
+    if (g) {
+      const eg = evalGateSimple(g, a);
+      if (!eg.ok) return { hasAnswer: true, isOk: false, whyCore: g.reason || "No cumple gate" };
+    }
+
+    // 2) Scoring (si existe)
+    const sr = getScoringRuleByHeader(RULES, header);
+    if (sr && sr.r) {
+      const r = sr.r;
+
+      if (r.type === "equals") {
+        const ok = a === String(r.value ?? "");
+        return { hasAnswer: true, isOk: ok, whyCore: ok ? `respondió "${a}" y coincide con lo esperado` : `respondió "${a}" y no coincide con lo esperado` };
+      }
+
+      if (r.type === "contains_all") {
+        const normv = normalizeText(a);
+        const ok = (r.value || []).every(v => normv.includes(normalizeText(v)));
+        return { hasAnswer: true, isOk: ok, whyCore: ok ? "incluye todas las reglas obligatorias" : "no incluye todas las reglas obligatorias" };
+      }
+
+      if (r.type === "map") {
+        const pts = Number((r.points_map && (r.points_map[a] ?? r.points_map[String(a)])) || 0);
+        const ok = pts > 0;
+        return { hasAnswer: true, isOk: ok, whyCore: ok ? `suma puntos (${pts})` : "no suma puntos (0)" };
+      }
+    }
+
+    // 3) Sin regla: si hay respuesta, válida mínima
+    return { hasAnswer: true, isOk: true, whyCore: "hay respuesta" };
+  }
+
+  function closedJustificationStrict(answer, isOk, whyCore) {
+    const a = String(answer ?? "").trim();
+    if (!a) return "";
+    if (isOk) return `OK porque ${whyCore || "cumple la condición"}.`;
+    return `NO ES VALIDO porque ${whyCore || "no cumple la condición"}.`;
+  }
+
+  // -------------------------
+  // Render Parte 1/3 (mantiene lógica anterior)
+  // -------------------------
 
   function inferEstadoPorHeader(header, correctList, incorrectList) {
     const h = canonHeader(header);
@@ -178,42 +321,6 @@
     if (hitOk) return hitOk;
     return "—";
   }
-
-  // -------------------------
-  // Estilos internos para NO heredar monospace / pre-wrap
-  // -------------------------
-
-  function ensureInnerStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-
-    const st = document.createElement("style");
-    st.id = STYLE_ID;
-
-    st.textContent = `
-      /* El panel original usa monospace + pre-wrap. Lo anulamos SOLO dentro del wrap nuevo */
-      #${WRAP_ID}, #${WRAP_ID} *{
-        font-family: var(--font, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial) !important;
-        white-space: normal !important;
-      }
-      #${WRAP_ID} .table{
-        table-layout: fixed;
-        width:100%;
-      }
-      #${WRAP_ID} th, #${WRAP_ID} td{
-        overflow-wrap: anywhere;
-        word-break: break-word;
-      }
-      /* Evita que una respuesta larguísima empuje todo */
-      #${WRAP_ID} td:nth-child(3){
-        max-width: 520px;
-      }
-    `;
-    document.head.appendChild(st);
-  }
-
-  // -------------------------
-  // Render (3 partes)
-  // -------------------------
 
   function renderParte13(rowRaw, correctList, incorrectList) {
     const pct = pctFixed(1, 12);
@@ -277,40 +384,48 @@
     `;
   }
 
-  function renderParte23(rowRaw, correctList, incorrectList) {
-    const pct = pctFixed(1, 13);
+  // -------------------------
+  // Render Parte 2/3 (CORREGIDA: puntaje+justificación estricta)
+  // -------------------------
+
+  async function renderParte23(rowRaw) {
+    const RULES = await loadRulesOnce();
+    const pct = toPctTxt(100 / 13); // "7,69%"
 
     const items = Q_CERRADAS_FIJAS.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
       const qnum = headerNumber(header) + "/33";
       const pregunta = questionTextFromHeader(header);
-      const resp = safeVal(rowRaw?.[header]);
+      const respRaw = String(rowRaw?.[header] ?? "");
+      const resp = safeVal(respRaw);
 
-      const estado = inferEstadoPorHeader(header, correctList, incorrectList);
-      const just = inferJustificacion(header, correctList, incorrectList);
-      const puntos = (estado === "CORRECTA") ? pct : (estado === "INCORRECTA" ? "0" : "—");
+      const ev = RULES ? evalClosedOkByRules(RULES, header, respRaw) : { hasAnswer: !!respRaw.trim(), isOk: false, whyCore: "no se cargaron reglas" };
 
-      return { idx, qnum, pregunta, resp, estado, just, puntos };
+      // Puntaje SOLO si hay respuesta
+      const puntaje = ev.hasAnswer ? (ev.isOk ? pct : "0") : "";
+      const just = ev.hasAnswer ? closedJustificationStrict(respRaw, ev.isOk, ev.whyCore) : "";
+
+      return { idx, qnum, pregunta, resp, hasAnswer: ev.hasAnswer, isOk: ev.isOk, puntaje, just };
     });
 
     const total = 13;
-    const validas = items.filter(x => x.estado === "CORRECTA").length;
-    const incorrectas = items.filter(x => x.estado === "INCORRECTA").length;
+    const validas = items.filter(x => x.isOk).length;
+    const incorrectas = total - validas;
 
     const pctValid = total ? Math.round((validas / total) * 100) : 0;
     const pctInc = total ? Math.round((incorrectas / total) * 100) : 0;
 
-    const estadoResumen = (pctValid >= 70) ? "APTO" : (pctValid >= 50) ? "REVISAR" : "DESCARTADO";
+    const estadoResumen = (pctValid >= 70) ? "REVISAR_AUTO" : "DESCARTADO_AUTO";
 
     const rowsCerradas = () => items.map(x => `
       <tr>
         <td>${x.idx + 1}</td>
         <td><span class="kbd">${esc(x.qnum)}</span></td>
         <td>${esc(x.pregunta)}</td>
-        <td>${esc(x.puntos)}</td>
+        <td>${esc(x.puntaje)}</td>
         <td>${esc(x.resp)}</td>
         <td>${esc(x.just)}</td>
-        <td>${pct}</td>
+        <td>${esc(pct)}</td>
       </tr>
     `).join("");
 
@@ -325,7 +440,7 @@
                 <th style="min-width:260px;">RESUMEN — RESPUESTAS “CERRADAS”</th>
                 <th style="width:100px;">UNIDAD</th>
                 <th style="width:120px;">PORCENTAJE</th>
-                <th style="width:160px;">ESTADO</th>
+                <th style="width:180px;">ESTADO (solo 2)</th>
               </tr>
             </thead>
             <tbody>
@@ -337,8 +452,7 @@
         </div>
 
         <div class="muted" style="margin-top:8px;">
-          Regla (solo informativa para Parte 2/3): ≥70% = APTO, 50–69% = REVISAR, &lt;50% = DESCARTADO.
-          (Esta parte NO decide el estado final, es resumen fijo de cerradas.)
+          Regla Parte 2/3 (AUTOMÁTICA): &lt;70% = DESCARTADO_AUTO | ≥70% = REVISAR_AUTO.
         </div>
 
         <div style="margin-top:14px;">
@@ -352,7 +466,7 @@
                   <th style="width:280px;">PREGUNTA</th>
                   <th style="width:110px;">PUNTAJE</th>
                   <th style="width:240px;">RESPUESTA DEL VENDEDOR</th>
-                  <th style="width:320px;">JUSTIFICACIÓN “CERRADA” — RESPUESTA DE LA IA</th>
+                  <th style="width:360px;">JUSTIFICACIÓN “CERRADA” — RESPUESTA DE LA IA</th>
                   <th style="width:120px;">PORCENTAJE</th>
                 </tr>
               </thead>
@@ -363,6 +477,10 @@
       </div>
     `;
   }
+
+  // -------------------------
+  // Render Parte 3/3
+  // -------------------------
 
   function renderParte33(rowRaw) {
     const rows = Q_INFO.map((qid, idx) => {
@@ -401,7 +519,6 @@
 
   // -------------------------
   // Ocultar bloque viejo "PASO 2.4"
-  // (más robusto: no depende solo de .muted)
   // -------------------------
 
   function hideOldPaso24(panel) {
@@ -409,34 +526,30 @@
     const marker = candidates.find(el => norm(el.textContent || "").includes("paso 2.4"));
     if (!marker) return;
 
-    // A veces el layout viejo viene “pegado” en el siguiente contenedor
     const next = marker.nextElementSibling;
     marker.style.display = "none";
     if (next) next.style.display = "none";
   }
 
   // -------------------------
-  // RowKey: para re-patchear al cambiar de fila
+  // RowKey
   // -------------------------
 
   function buildRowKey(rowRaw) {
-    // Robustez: marca temporal + email (si falta algo, igual arma key)
     const mt = safeVal(rowRaw?.["Marca temporal"]);
     const em = safeVal(rowRaw?.["Dirección de correo electrónico"]);
     return `${mt}__${em}`;
   }
 
   // -------------------------
-  // Patch principal (re-render por fila)
+  // Patch principal
   // -------------------------
 
-  function patch(panel) {
+  async function patch(panel) {
     if (!panel) return;
     if (panel.style.display === "none") return;
 
     ensureInnerStyle();
-
-    // Siempre: ocultar cajas inútiles + ocultar paso viejo
     hideUselessCorrectIncorrectBoxes(panel);
     hideOldPaso24(panel);
 
@@ -445,14 +558,12 @@
 
     const rowKey = buildRowKey(rowRaw);
     const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
-
-    // Si ya está renderizado para ESTA fila y el wrap existe, no hagas nada
     const existingWrap = panel.querySelector(`#${WRAP_ID}`);
     if (prevKey === rowKey && existingWrap) return;
 
-    // Si cambia la fila: borrar wrap anterior y re-crear
     if (existingWrap) existingWrap.remove();
 
+    // correct/incorrect siguen existiendo para Parte 1/3
     const correctList = extractList(panel, "CORRECTAS");
     const incorrectList = extractList(panel, "INCORRECTAS");
 
@@ -463,15 +574,16 @@
 
     const wrap = document.createElement("div");
     wrap.id = WRAP_ID;
+
+    const parte23 = await renderParte23(rowRaw);
+
     wrap.innerHTML = `
       ${renderParte13(rowRaw, correctList, incorrectList)}
-      ${renderParte23(rowRaw, correctList, incorrectList)}
+      ${parte23}
       ${renderParte33(rowRaw)}
     `;
 
     jsonDiv.parentNode.insertBefore(wrap, jsonDiv);
-
-    // Guardar key de la fila actual
     panel.setAttribute(PATCH_KEY_ATTR, rowKey);
   }
 
@@ -484,13 +596,10 @@
     if (!panel) return;
 
     const obs = new MutationObserver(() => {
-      // ui.js re-renderiza: re-patchear SIEMPRE según rowKey
       patch(panel);
     });
 
     obs.observe(panel, { childList: true, subtree: true });
-
-    // primer intento
     patch(panel);
   }
 
