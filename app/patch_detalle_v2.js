@@ -1,10 +1,19 @@
 // =====================================================
 // PATCH DETALLE V2 (SIN TOCAR ui.js)
 // - Renderiza 3 partes del detalle estilo mock
-// - Parte 2/3 (13 cerradas):
-//   * Puntaje SOLO: "7,69%" o "0" (si hay respuesta)
-//   * Justificación SOLO: "OK porque ..." / "NO ES VALIDO porque ..."
-//   * Evaluación usando rules/rules_v1.json (gates/scoring por header)
+// - Parte 2/3 (13 cerradas): usa rules/rules_v1.json
+//
+// ✅ NUEVO (TU PEDIDO):
+// PARTE 1/3:
+// A) Completa AUTOMÁTICO 3 columnas SOLO si hay respuesta:
+//    - Señales detectadas (válida rta)
+//    - Reglas éticas afectadas (si aplica)
+//    - Opinión IA (NO decide)
+// B1) Permite editar 2 columnas (Observación humana + Porcentaje) y guardar localStorage
+// B2) Agrega TABLA RESUMEN Parte 1/3:
+//    - ≥70% => APROBADO | <70% => NO VALIDO
+//
+// Nota: no crea archivos nuevos.
 // =====================================================
 
 (() => {
@@ -13,6 +22,9 @@
   const PATCH_KEY_ATTR = "data-patched-v2-key";
   const WRAP_ID = "detalleV2_wrap";
   const STYLE_ID = "detalleV2_style";
+
+  // LocalStorage para Parte 1/3 (humano)
+  const LS_P13_KEY = "cfc_preseleccion_p13_v1";
 
   // -------------------------
   // Helpers
@@ -69,6 +81,58 @@
   function toPctTxt(n) {
     const v = Math.round(Number(n) * 100) / 100;
     return v.toFixed(2).replace(".", ",") + "%";
+  }
+
+  function parsePctInputToNumber(txt) {
+    // acepta "8,33" "8.33" "8,33%" "8.33%"
+    const s = String(txt ?? "").trim().replace("%", "").replace(",", ".");
+    const n = Number(s);
+    if (!isFinite(n) || n < 0) return 0;
+    return Math.min(100, n);
+  }
+
+  // -------------------------
+  // Storage Parte 1/3 humano
+  // -------------------------
+
+  function loadP13Store() {
+    try {
+      const raw = localStorage.getItem(LS_P13_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === "object") ? obj : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveP13Store(store) {
+    try {
+      localStorage.setItem(LS_P13_KEY, JSON.stringify(store || {}));
+    } catch (_) {}
+  }
+
+  function getP13Row(store, rowKey) {
+    if (!store[rowKey]) store[rowKey] = { obs: {}, pct: {}, total_pct: 0, estado_def: "" };
+    if (!store[rowKey].obs) store[rowKey].obs = {};
+    if (!store[rowKey].pct) store[rowKey].pct = {};
+    return store[rowKey];
+  }
+
+  function computeP13TotalFromRow(p13Row) {
+    // SUMA de porcentajes por pregunta (lo definís vos con tu input)
+    // Si no cargás nada => 0
+    const pctObj = p13Row?.pct || {};
+    let sum = 0;
+    for (const v of Object.values(pctObj)) sum += parsePctInputToNumber(v);
+    sum = Math.max(0, Math.min(100, Math.round(sum * 100) / 100));
+    const estado = (sum >= 70) ? "APROBADO" : "NO VALIDO";
+    return { total: sum, estado };
+  }
+
+  function emitP13Updated(rowKey) {
+    try {
+      window.dispatchEvent(new CustomEvent("psv:p13updated", { detail: { rowKey } }));
+    } catch (_) {}
   }
 
   // -------------------------
@@ -189,6 +253,34 @@
         word-break: break-word;
       }
       #${WRAP_ID} td:nth-child(3){ max-width: 520px; }
+
+      /* Inputs Parte 1/3 */
+      #${WRAP_ID} .p13InputObs{
+        width: 100%;
+        min-height: 34px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.03);
+        color: var(--text);
+        padding: 8px;
+        font-family: var(--font) !important;
+        font-size: 12px;
+      }
+      #${WRAP_ID} .p13InputPct{
+        width: 110px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.03);
+        color: var(--text);
+        padding: 8px;
+        font-family: var(--font) !important;
+        font-size: 12px;
+      }
+      #${WRAP_ID} .p13Hint{
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 8px;
+      }
     `;
     document.head.appendChild(st);
   }
@@ -299,7 +391,7 @@
   }
 
   // -------------------------
-  // Render Parte 1/3 (mantiene lógica anterior)
+  // Render Parte 1/3 (✅ AJUSTADO A TU PEDIDO)
   // -------------------------
 
   function inferEstadoPorHeader(header, correctList, incorrectList) {
@@ -322,47 +414,107 @@
     return "—";
   }
 
+  function buildRowKey(rowRaw) {
+    const mt = safeVal(rowRaw?.["Marca temporal"]);
+    const em = safeVal(rowRaw?.["Dirección de correo electrónico"]);
+    return `${mt}__${em}`;
+  }
+
   function renderParte13(rowRaw, correctList, incorrectList) {
-    const pct = pctFixed(1, 12);
+    const pctFixedPerQ = pctFixed(1, 12);
+    const rowKey = buildRowKey(rowRaw);
+
+    // Traer lo humano guardado
+    const store = loadP13Store();
+    const p13Row = getP13Row(store, rowKey);
 
     const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
       const qnum = headerNumber(header) + "/33";
       const pregunta = questionTextFromHeader(header);
-      const ans = safeVal(rowRaw?.[header]);
 
-      const estado = inferEstadoPorHeader(header, correctList, incorrectList);
-      const senales = (estado === "CORRECTA")
-        ? "✔ Respuesta VÁLIDA (señales automáticas)"
-        : (estado === "INCORRECTA")
-          ? "✖ Respuesta NO VÁLIDA (señales automáticas)"
-          : "—";
+      const ansRaw = String(rowRaw?.[header] ?? "");
+      const ansTrim = ansRaw.trim();
+      const ans = safeVal(ansRaw);
 
-      const incHit = inferJustificacion(header, correctList, incorrectList);
-      const eticas =
-        (String(incHit).toLowerCase().includes("banned") ||
-         String(incHit).toLowerCase().includes("marketing") ||
-         String(incHit).toLowerCase().includes("prohib"))
-          ? incHit
-          : (estado === "INCORRECTA" ? incHit : "—");
+      // Regla A: si NO hay respuesta => 3 columnas automáticas VACÍAS
+      let senales = "";
+      let eticas = "";
+      let opinion = "";
+
+      if (ansTrim.length) {
+        const estadoAuto = inferEstadoPorHeader(header, correctList, incorrectList);
+
+        // Señales
+        if (estadoAuto === "CORRECTA") senales = "✔ Respuesta VÁLIDA (señales automáticas)";
+        else if (estadoAuto === "INCORRECTA") senales = "✖ Respuesta NO VÁLIDA (señales automáticas)";
+        else senales = "—";
+
+        // Reglas éticas (si aplica)
+        const incHit = inferJustificacion(header, correctList, incorrectList);
+        const incHitLow = String(incHit || "").toLowerCase();
+
+        // criterio simple: si hay una falla / banned / marketing / prohib => lo mostramos
+        if (estadoAuto === "INCORRECTA" && (incHitLow.includes("banned") || incHitLow.includes("marketing") || incHitLow.includes("prohib") || incHitLow.includes("falla"))) {
+          eticas = incHit;
+        } else {
+          eticas = "—";
+        }
+
+        // Opinión IA (NO decide): SOLO opinión del sistema, sin “decidir”
+        if (estadoAuto === "CORRECTA") opinion = "VÁLIDA (no decide)";
+        else if (estadoAuto === "INCORRECTA") opinion = "NO VÁLIDA (no decide)";
+        else opinion = "—";
+      }
+
+      // Inputs humanos
+      const obsVal = String(p13Row.obs?.[qid] ?? "");
+      const pctVal = String(p13Row.pct?.[qid] ?? "");
 
       return `
         <tr>
           <td>${idx + 1}</td>
           <td><span class="kbd">${esc(qnum)}</span> ${esc(pregunta)}</td>
           <td>${esc(ans)}</td>
+
           <td>${esc(senales)}</td>
           <td>${esc(eticas)}</td>
-          <td><b>${esc(estado)}</b></td>
-          <td>—</td>
-          <td>${pct}</td>
+          <td><b>${esc(opinion)}</b></td>
+
+          <td>
+            <textarea
+              class="p13InputObs"
+              data-p13="obs"
+              data-rowkey="${esc(rowKey)}"
+              data-qid="${esc(qid)}"
+              placeholder="(solo vos) Observación humana..."
+            >${esc(obsVal)}</textarea>
+          </td>
+
+          <td>
+            <input
+              class="p13InputPct"
+              data-p13="pct"
+              data-rowkey="${esc(rowKey)}"
+              data-qid="${esc(qid)}"
+              inputmode="decimal"
+              placeholder="ej: 8,33"
+              value="${esc(pctVal)}"
+            />
+            <div class="p13Hint">Referencia: ${esc(pctFixedPerQ)} por pregunta (si usás reparto fijo)</div>
+          </td>
         </tr>
       `;
     }).join("");
 
+    // Summary Parte 1/3 (B2)
+    const totals = computeP13TotalFromRow(p13Row);
+    const totalPctTxt = toPctTxt(totals.total);
+
     return `
       <div class="miniCard" style="margin-top:14px;">
         <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
+
         <div style="overflow:auto; margin-top:10px;">
           <table class="table">
             <thead>
@@ -372,13 +524,44 @@
                 <th style="width:360px;">RESPUESTA DEL VENDEDOR</th>
                 <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
                 <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
-                <th style="width:160px;">OPINIÓN IA (NO decide)</th>
-                <th style="width:180px;">OBSERVACIÓN HUMANA</th>
-                <th style="width:110px;">PORCENTAJE</th>
+                <th style="width:180px;">OPINIÓN IA (NO decide)</th>
+                <th style="width:260px;">OBSERVACIÓN HUMANA</th>
+                <th style="width:160px;">PORCENTAJE</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>
+        </div>
+
+        <div style="margin-top:12px; overflow:auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>RESUMEN — PARTE 1/3</th>
+                <th style="width:120px;">UNIDAD</th>
+                <th style="width:140px;">PORCENTAJE</th>
+                <th style="width:180px;">ESTADO (definitivo)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>TOTAL DE PREGUNTAS</b></td>
+                <td>12</td>
+                <td>100%</td>
+                <td>—</td>
+              </tr>
+              <tr>
+                <td><b>RESULTADO DEFINITIVO</b> (suma de tus porcentajes)</td>
+                <td>—</td>
+                <td><b>${esc(totalPctTxt)}</b></td>
+                <td><b>${esc(totals.estado)}</b></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="p13Hint" style="margin-top:10px;">
+          Regla Parte 1/3: <b>≥70% = APROBADO</b> | <b>&lt;70% = NO VALIDO</b>. (Lo define TU porcentaje manual)
         </div>
       </div>
     `;
@@ -532,13 +715,53 @@
   }
 
   // -------------------------
-  // RowKey
+  // Bind inputs Parte 1/3
   // -------------------------
 
-  function buildRowKey(rowRaw) {
-    const mt = safeVal(rowRaw?.["Marca temporal"]);
-    const em = safeVal(rowRaw?.["Dirección de correo electrónico"]);
-    return `${mt}__${em}`;
+  function bindP13Inputs(wrap) {
+    if (!wrap) return;
+
+    const store = loadP13Store();
+
+    // OBS
+    wrap.querySelectorAll("textarea[data-p13='obs']").forEach(el => {
+      el.addEventListener("input", () => {
+        const rowKey = el.getAttribute("data-rowkey") || "";
+        const qid = el.getAttribute("data-qid") || "";
+        const p13Row = getP13Row(store, rowKey);
+
+        p13Row.obs[qid] = el.value || "";
+
+        const totals = computeP13TotalFromRow(p13Row);
+        p13Row.total_pct = totals.total;
+        p13Row.estado_def = totals.estado;
+
+        saveP13Store(store);
+        emitP13Updated(rowKey);
+      });
+    });
+
+    // PCT
+    wrap.querySelectorAll("input[data-p13='pct']").forEach(el => {
+      const handler = () => {
+        const rowKey = el.getAttribute("data-rowkey") || "";
+        const qid = el.getAttribute("data-qid") || "";
+        const p13Row = getP13Row(store, rowKey);
+
+        p13Row.pct[qid] = el.value || "";
+
+        const totals = computeP13TotalFromRow(p13Row);
+        p13Row.total_pct = totals.total;
+        p13Row.estado_def = totals.estado;
+
+        saveP13Store(store);
+        emitP13Updated(rowKey);
+      };
+
+      el.addEventListener("input", handler);
+      el.addEventListener("change", handler);
+      el.addEventListener("blur", handler);
+    });
   }
 
   // -------------------------
@@ -585,6 +808,9 @@
 
     jsonDiv.parentNode.insertBefore(wrap, jsonDiv);
     panel.setAttribute(PATCH_KEY_ATTR, rowKey);
+
+    // Bind inputs (importante: después del insert)
+    bindP13Inputs(wrap);
   }
 
   // -------------------------
