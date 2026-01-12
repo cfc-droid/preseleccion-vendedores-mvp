@@ -1,12 +1,12 @@
-// ====================================================
+// =====================================================
 // PATCH DETALLE V3 — FIX UI (SIN TOCAR ui.js / app.js)
-// ====================================================
+// =====================================================
 // FIXES:
 // 1) Oculta las 2 cajas "Respuestas/condiciones CORRECTAS" y "INCORRECTAS (por qué)"
 // 2) Evita que se "estire" a la derecha + fuerza barras (scroll) donde corresponde
 // 3) Parte 2/3: primero resumen chico, luego tabla 13 preguntas (reorden DOM original)
 // 4) Parte 3/3: oculta columna "Largo"
-// ====================================================
+// =====================================================
 
 (() => {
   const DETAIL_ID = "detailPanel";
