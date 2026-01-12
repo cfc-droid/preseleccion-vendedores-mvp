@@ -397,6 +397,55 @@ window.UI = (() => {
     return t;
   }
 
+  function renderQTableAltaWithSignals(title, rows, openAIMap) {
+    // PARTE 1/3 — ABIERTAS ALTA: incluye 3 columnas NUEVAS:
+    // Señales | Ética | Opinión
+    // REGLA DURA 1: si respuesta vacía -> estas 3 columnas deben quedar VACÍAS reales.
+    const t = `
+      <div class="miniCard">
+        <div class="sectionTitle">${escapeHtml(title)}</div>
+        <div style="overflow:auto; margin-top:8px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:70px;">Q</th>
+                <th style="min-width:240px;">Pregunta</th>
+                <th style="min-width:340px;">Respuesta</th>
+                <th style="min-width:220px;">Señales</th>
+                <th style="min-width:220px;">Ética</th>
+                <th style="min-width:220px;">Opinión</th>
+                <th style="width:90px;">Largo</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => {
+                const ev = (openAIMap && openAIMap[r.qid]) ? openAIMap[r.qid] : null;
+
+                // IMPORTANTE: vacío real si no hay ev (incluye respuesta vacía)
+                const sig = ev && String(ev.signals ?? "").trim().length ? String(ev.signals) : "";
+                const eth = ev && String(ev.ethics ?? "").trim().length ? String(ev.ethics) : "";
+                const op  = ev && String(ev.opinion ?? "").trim().length ? String(ev.opinion) : "";
+
+                return `
+                  <tr>
+                    <td><span class="kbd">${escapeHtml(r.qid)}</span></td>
+                    <td>${escapeHtml(r.qtext)}</td>
+                    <td>${escapeHtml(r.ans)}</td>
+                    <td>${sig.length ? escapeHtml(sig) : ""}</td>
+                    <td>${eth.length ? escapeHtml(eth) : ""}</td>
+                    <td>${op.length ? escapeHtml(op) : ""}</td>
+                    <td>${String((r.ans && r.ans !== "—") ? String(r.ans).length : 0)}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    return t;
+  }
+
   function renderClosedFixedTables(title, rows, summary) {
     // Parte 2/3: columnas completas y cantidad FIJA
     const t = `
@@ -716,6 +765,9 @@ window.UI = (() => {
     const fixedClosedRows = buildFixedClosedRows(item, RULES || {});
     const fixedClosedSummary = buildClosedSummary(fixedClosedRows);
 
+    // NUEVO: Parte 1/3 — open_ai (3 columnas)
+    const openAIMap = item.open_ai || null;
+
     panel.innerHTML = `
       <div class="row" style="margin-bottom:10px;">
         <div class="pill">Fila: <strong>${item.fila}</strong></div>
@@ -741,7 +793,7 @@ window.UI = (() => {
       <div style="margin-top:12px;" class="muted">PASO 2.4 — Detalle por secciones:</div>
 
       <div style="display:grid; gap:12px; margin-top:10px;">
-        ${renderQTable("PARTE 1/3 — Preguntas ABIERTAS (PRIORIDAD ALTA)", sections.alta)}
+        ${renderQTableAltaWithSignals("PARTE 1/3 — Preguntas ABIERTAS (PRIORIDAD ALTA)", sections.alta, openAIMap)}
         ${renderClosedFixedTables("PARTE 2/3 — RESUMEN (CERRADAS) — FIJO (13 preguntas)", fixedClosedRows, fixedClosedSummary)}
         ${renderQTable("PARTE 3/3 — Preguntas ABIERTAS (INFORMATIVAS)", sections.info)}
       </div>
