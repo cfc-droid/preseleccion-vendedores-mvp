@@ -1,0 +1,345 @@
+{
+  "version": "open_signals_v1",
+  "defaults": {
+    "short_min_chars": 80,
+    "min_chars_per_line": 3,
+    "risk_rules": [
+      {
+        "id": "RISK_DINERO_RAPIDO",
+        "type": "regex",
+        "pattern": "(dinero\\s*rápido|plata\\s*rápida|gan(á|a)\\s*(rápido|en\\s*pocos\\s*días)|en\\s*\\d+\\s*(d(i|í)as|semanas)|sin\\s*esfuerzo)",
+        "signals": ["Menciona 'dinero rápido' / urgencia"],
+        "ethics": ["No promesas", "No expectativas falsas"],
+        "severity": "bad"
+      },
+      {
+        "id": "RISK_GARANTIA",
+        "type": "regex",
+        "pattern": "(garantizad(o|a)|asegurad(o|a)|100%\\s*seguro|sin\\s*riesgo|resultado\\s*seguro)",
+        "signals": ["Sugiere garantía / sin riesgo"],
+        "ethics": ["No promesas", "No garantías"],
+        "severity": "bad"
+      },
+      {
+        "id": "RISK_NUMEROS_MAGICOS",
+        "type": "regex",
+        "pattern": "(\\$\\s*\\d+|usd\\s*\\d+|\\b\\d{3,}\\b\\s*(usd|d(o|ó)lares|pesos)?|\\b(x\\d+|\\d+x)\\b|duplic(ar|o)\\s*tu\\s*dinero)",
+        "signals": ["Menciona cifras / números 'mágicos'"],
+        "ethics": ["No promesas", "No expectativas falsas"],
+        "severity": "bad"
+      },
+      {
+        "id": "RISK_MARKETING_AGRESIVO",
+        "type": "regex",
+        "pattern": "(ap(ú|u)rate|urgente|hoy\\s*mismo|solo\\s*hoy|no\\s*te\\s*lo\\s*pierdas|ultima\\s*chance|presion|insistir\\s*hasta\\s*que\\s*compren)",
+        "signals": ["Tono de presión / marketing agresivo"],
+        "ethics": ["No marketing agresivo"],
+        "severity": "warn"
+      }
+    ]
+  },
+  "questions": {
+    "Q1": {
+      "short_min_chars": 60,
+      "rules": [
+        {
+          "id": "Q1_HAS_PHRASE_CORE",
+          "type": "regex",
+          "pattern": "entiendo\\s+que\\s+este\\s+modelo\\s+no\\s+es\\s+un\\s+empleo\\s+y\\s+cobro\\s+solo\\s+por\\s+resultados",
+          "signals_ok": ["Incluye la frase pedida (core)"],
+          "signals_bad": ["No incluye la frase pedida (core)"],
+          "severity_if_missing": "bad"
+        },
+        {
+          "id": "Q1_HAS_AT",
+          "type": "regex",
+          "pattern": "@[a-z0-9_\\.]{2,}",
+          "signals_ok": ["Incluye @usuario"],
+          "signals_bad": ["Falta @usuario"],
+          "severity_if_missing": "warn"
+        },
+        {
+          "id": "Q1_HAS_CITY_HEUR",
+          "type": "regex",
+          "pattern": "(\\s[–\\-]\\s*[a-záéíóúñ\\s]{3,}$)",
+          "signals_ok": ["Incluye ciudad (heurística)"],
+          "signals_bad": ["No se detecta ciudad al final"],
+          "severity_if_missing": "warn"
+        }
+      ],
+      "opinions": {
+        "ok": "Respuesta bien armada: incluye la frase solicitada y datos mínimos (@ + ciudad).",
+        "warn": "Respuesta parcial: parece faltar algún elemento formal (@ y/o ciudad) o está incompleta.",
+        "bad": "Respuesta no cumple la consigna principal (frase requerida) o está mal armada."
+      }
+    },
+
+    "Q9": {
+      "short_min_chars": 8,
+      "rules": [
+        {
+          "id": "Q9_EMAIL_FORMAT",
+          "type": "regex",
+          "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$",
+          "signals_ok": ["Email con formato válido"],
+          "signals_bad": ["Email con formato inválido"],
+          "severity_if_missing": "bad"
+        }
+      ],
+      "opinions": {
+        "ok": "Formato de email correcto.",
+        "warn": "Email dudoso: revisar si corresponde al real del formulario.",
+        "bad": "Email inválido: falta formato básico (@ y dominio)."
+      }
+    },
+
+    "Q13": {
+      "rules": [
+        {
+          "id": "Q13_GENERIC_SMOKE",
+          "type": "regex",
+          "pattern": "\\b(de\\s*todo|varias\\s*cosas|mucho|un\\s*poco\\s*de\\s*todo|lo\\s*que\\s*sea)\\b",
+          "signals": ["Respuesta genérica ('de todo' / 'varias cosas')"],
+          "severity": "warn"
+        },
+        {
+          "id": "Q13_TOO_VAGUE",
+          "type": "regex",
+          "pattern": "\\b(ventas|comercial|marketing)\\b$",
+          "signals": ["No nombra productos concretos (termina muy genérico)"],
+          "severity": "warn"
+        }
+      ],
+      "opinions": {
+        "ok": "Menciona productos/servicios de forma concreta y entendible.",
+        "warn": "Respuesta algo genérica: podría no quedar claro qué vendió exactamente.",
+        "bad": "Respuesta no aporta información verificable (muy vaga o puro humo)."
+      }
+    },
+
+    "Q14": {
+      "rules": [
+        {
+          "id": "Q14_HAS_METHOD_HINTS",
+          "type": "regex",
+          "pattern": "\\b(dm|mensaje\\s*directo|contenido|referid|whatsapp|llamad|seguimiento|embudo|publicidad|anuncio|cold)\\b",
+          "signals": ["Menciona método/canal específico"],
+          "severity": "ok"
+        },
+        {
+          "id": "Q14_TOO_GENERIC",
+          "type": "regex",
+          "pattern": "\\b(por\\s*redes|internet|marketing)\\b",
+          "signals": ["Describe de forma genérica ('por redes' / 'internet')"],
+          "severity": "warn"
+        }
+      ],
+      "opinions": {
+        "ok": "Describe un método de venta con algún detalle (canal/proceso).",
+        "warn": "Método poco específico: suena genérico y no explica proceso.",
+        "bad": "No explica cómo vendía (insuficiente para entender el método)."
+      }
+    },
+
+    "Q15": {
+      "rules": [
+        {
+          "id": "Q15_MONEY_FAST",
+          "type": "regex",
+          "pattern": "(ganar\\s*(dinero|plata)\\s*r(a|á)pido|dinero\\s*f(a|á)cil|me\\s*urge\\s*ganar)",
+          "signals": ["Enfoque en 'ganar rápido'"],
+          "ethics": ["No promesas", "No expectativas falsas"],
+          "severity": "bad"
+        }
+      ],
+      "opinions": {
+        "ok": "Experiencia redactada de forma coherente y con contexto real.",
+        "warn": "Experiencia muy breve o poco específica: puede requerir revisión humana.",
+        "bad": "Señales de motivación inadecuada ('dinero rápido') o inconsistencia fuerte."
+      }
+    },
+
+    "Q18": {
+      "rules": [
+        {
+          "id": "Q18_MIN_3_LINES",
+          "type": "min_lines",
+          "min_lines": 3,
+          "min_chars_per_line": 3,
+          "signals_ok": ["Lista al menos 3 lugares (1 por línea)"],
+          "signals_bad": ["No lista 3 lugares en líneas separadas"],
+          "severity_if_missing": "warn"
+        },
+        {
+          "id": "Q18_GENERIC_PLACES",
+          "type": "regex",
+          "pattern": "\\b(internet|redes|facebook|instagram|tiktok|grupos)\\b$",
+          "signals": ["Lugares poco concretos (genérico)"],
+          "severity": "warn"
+        },
+        {
+          "id": "Q18_HAS_LINK_OR_NAME",
+          "type": "regex",
+          "pattern": "(http(s)?://|www\\.|@)",
+          "signals": ["Incluye link/@ (más concreto)"],
+          "severity": "ok"
+        }
+      ],
+      "opinions": {
+        "ok": "Aporta lugares concretos y accionables (ideal si incluye links o nombres).",
+        "warn": "No cumple formato o los lugares son genéricos: puede requerir revisión.",
+        "bad": "No aporta lugares concretos para difusión (respuesta insuficiente)."
+      }
+    },
+
+    "Q21": {
+      "rules": [
+        {
+          "id": "Q21_MENTIONS_SALARY",
+          "type": "regex",
+          "pattern": "\\b(sueldo|fijo|garantizad(o|a)|mensual)\\b",
+          "signals": ["Menciona sueldo/fijo/garantía (confunde el modelo)"],
+          "ethics": ["Transparencia del modelo", "Solo comisión"],
+          "severity": "bad"
+        },
+        {
+          "id": "Q21_UNDERSTANDS_COMMISSION",
+          "type": "regex",
+          "pattern": "\\b(comisi(o|ó)n|solo\\s*si\\s*v(endo|ende)|por\\s*resultados|sin\\s*sueldo)\\b",
+          "signals": ["Entiende comisión / solo por resultados"],
+          "severity": "ok"
+        }
+      ],
+      "opinions": {
+        "ok": "Entiende que no hay sueldo y se cobra solo si hay ventas/resultados.",
+        "warn": "Entendimiento parcial: podría necesitar aclaración humana.",
+        "bad": "Confunde el modelo (habla de sueldo/fijo/garantías)."
+      }
+    },
+
+    "Q22": {
+      "rules": [
+        {
+          "id": "Q22_PROMISES",
+          "type": "regex",
+          "pattern": "(vas\\s*a\\s*ganar|ganancias\\s*seguras|te\\s*aseguro|garantizado|\\$\\s*\\d+|usd\\s*\\d+)",
+          "signals": ["Sugiere promesas/cifras al responder"],
+          "ethics": ["No promesas", "No expectativas falsas"],
+          "severity": "bad"
+        },
+        {
+          "id": "Q22_DEPENDS_EFFORT",
+          "type": "regex",
+          "pattern": "(depende|var(i|í)a|seg(u|ú)n\\s*(esfuerzo|trabajo)|no\\s*puedo\\s*prometer)",
+          "signals": ["Aclara que depende del esfuerzo y no promete"],
+          "severity": "ok"
+        }
+      ],
+      "opinions": {
+        "ok": "Mantiene una respuesta ética: no promete cifras y aclara dependencia del esfuerzo.",
+        "warn": "Respuesta poco clara: revisar que no genere expectativas indebidas.",
+        "bad": "Respuesta riesgosa: sugiere promesas o cifras (no permitido)."
+      }
+    },
+
+    "Q23": {
+      "rules": [
+        {
+          "id": "Q23_HAS_NO_PROMISES",
+          "type": "regex",
+          "pattern": "(no\\s*promet|no\\s*garant|no\\s*dinero\\s*f(a|á)cil|no\\s*resultados\\s*seguros|sin\\s*promesas)",
+          "signals": ["Incluye 'no promesas/no garantías'"],
+          "ethics": ["No promesas", "No garantías"],
+          "severity": "ok"
+        },
+        {
+          "id": "Q23_MINIMIZES_ETHICS",
+          "type": "regex",
+          "pattern": "(da\\s*igual|total\\s*no\\s*pasa\\s*nada|se\\s*puede\\s*exagerar|mentir\\s*un\\s*poco)",
+          "signals": ["Minimiza ética / sugiere exagerar"],
+          "ethics": ["No promesas", "No marketing agresivo"],
+          "severity": "bad"
+        }
+      ],
+      "opinions": {
+        "ok": "Reconoce límites éticos (no promesas, no garantías, no dinero fácil).",
+        "warn": "Menciona límites pero de forma incompleta: podría requerir revisión.",
+        "bad": "No respeta límites éticos o los minimiza."
+      }
+    },
+
+    "Q27": {
+      "rules": [
+        {
+          "id": "Q27_HAS_PRESSURE",
+          "type": "regex",
+          "pattern": "(ap(ú|u)rate|hoy\\s*mismo|ultima\\s*chance|no\\s*te\\s*lo\\s*pierdas)",
+          "signals": ["Incluye presión/urgencia"],
+          "ethics": ["No marketing agresivo"],
+          "severity": "warn"
+        },
+        {
+          "id": "Q27_HAS_PROMISES",
+          "type": "regex",
+          "pattern": "(ganar\\s*(dinero|plata)\\s*r(a|á)pido|garantizado|sin\\s*riesgo|resultado\\s*seguro)",
+          "signals": ["Incluye promesas/garantías en DM"],
+          "ethics": ["No promesas", "No garantías"],
+          "severity": "bad"
+        }
+      ],
+      "opinions": {
+        "ok": "DM presentable: describe sin promesas y con tono responsable.",
+        "warn": "DM con tono discutible (urgencia/presión) aunque sin promesas explícitas.",
+        "bad": "DM no apto: contiene promesas/garantías o prácticas riesgosas."
+      }
+    },
+
+    "Q30": {
+      "rules": [
+        {
+          "id": "Q30_TOO_VAGUE",
+          "type": "regex",
+          "pattern": "\\b(ver|analizar|pensar|mirar|investigar)\\b",
+          "signals": ["Plan poco concreto (verbos vagos)"],
+          "severity": "warn"
+        },
+        {
+          "id": "Q30_HAS_STEPS",
+          "type": "regex",
+          "pattern": "(d(i|í)a\\s*1|d(i|í)a\\s*2|paso\\s*\\d+|primero|despu(e|é)s|luego|semana)",
+          "signals": ["Incluye pasos/secuencia temporal"],
+          "severity": "ok"
+        }
+      ],
+      "opinions": {
+        "ok": "Acciones planteadas con cierta secuencia y concreción.",
+        "warn": "Acciones poco específicas: revisar si realmente hay plan ejecutable.",
+        "bad": "No hay acciones concretas (respuesta insuficiente)."
+      }
+    },
+
+    "Q31": {
+      "rules": [
+        {
+          "id": "Q31_ONLY_MONEY",
+          "type": "regex",
+          "pattern": "(quiero\\s*ganar\\s*(dinero|plata)|solo\\s*por\\s*plata|me\\s*interesa\\s*la\\s*plata)",
+          "signals": ["Motivación centrada solo en dinero (sin argumentos)"],
+          "severity": "warn"
+        },
+        {
+          "id": "Q31_HAS_ARGS",
+          "type": "regex",
+          "pattern": "(porque|ya\\s*he\\s*vendido|experiencia|disciplina|seguimiento|constancia|proceso)",
+          "signals": ["Incluye argumentos/razones concretas"],
+          "severity": "ok"
+        }
+      ],
+      "opinions": {
+        "ok": "Argumenta de forma coherente por qué sería apto (razones concretas).",
+        "warn": "Argumentación débil o muy centrada en 'ganar dinero': puede requerir revisión.",
+        "bad": "No argumenta (respuesta vacía de contenido)."
+      }
+    }
+  }
+}
