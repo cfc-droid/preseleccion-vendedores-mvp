@@ -122,6 +122,190 @@ function safeStr(v) {
 
 
 // ======================================================
+// NUEVO — Open signals (PARTE 1/3 ABIERTAS ALTA, informativo)
+// - NO decide, NO altera scoring/gates/flags
+// - Si falla el fetch => no completa columnas (vacío)
+// ======================================================
+
+let _OPEN_SIGNALS_CACHE = null;
+
+async function loadOpenSignalsOnce() {
+  if (_OPEN_SIGNALS_CACHE) return _OPEN_SIGNALS_CACHE;
+  try {
+    const res = await fetch("rules/open_signals_v1.json");
+    if (!res.ok) throw new Error(`No se pudo cargar open_signals_v1.json (HTTP ${res.status})`);
+    _OPEN_SIGNALS_CACHE = await res.json();
+    return _OPEN_SIGNALS_CACHE;
+  } catch (e) {
+    console.error(e);
+    _OPEN_SIGNALS_CACHE = null;
+    return null;
+  }
+}
+
+function joinOrEmpty(arr) {
+  const a = Array.isArray(arr) ? arr.map(x => String(x || "").trim()).filter(Boolean) : [];
+  return a.length ? a.join(" | ") : "";
+}
+
+function uniq(arr) {
+  return [...new Set((arr || []).filter(Boolean))];
+}
+
+function evalRuleGeneric(rule, answerRaw, answerNorm, defaults) {
+  const out = { matched: false, missing: false, signals: [], ethics: [], severity: null };
+  if (!rule || !rule.type) return out;
+
+  if (rule.type === "regex") {
+    try {
+      const re = new RegExp(rule.pattern, "i");
+      const ok = re.test(answerNorm);
+
+      // required-mode (signals_ok/signals_bad)
+      if (rule.signals_ok || rule.signals_bad) {
+        if (ok) {
+          out.matched = true;
+          out.signals.push(...(rule.signals_ok || []));
+        } else {
+          out.missing = true;
+          out.signals.push(...(rule.signals_bad || []));
+          out.severity = rule.severity_if_missing || "warn";
+        }
+        return out;
+      }
+
+      if (ok) {
+        out.matched = true;
+        out.signals.push(...(rule.signals || []));
+        out.ethics.push(...(rule.ethics || []));
+        out.severity = rule.severity || null;
+      }
+      return out;
+    } catch (_) {
+      return out;
+    }
+  }
+
+  if (rule.type === "min_lines") {
+    const minLines = Number(rule.min_lines || 0);
+    const minChars = Number(rule.min_chars_per_line ?? defaults?.min_chars_per_line ?? 1);
+    const lines = countValidLines(answerRaw, minChars);
+    const ok = lines >= minLines;
+
+    if (rule.signals_ok || rule.signals_bad) {
+      if (ok) {
+        out.matched = true;
+        out.signals.push(...(rule.signals_ok || []));
+      } else {
+        out.missing = true;
+        out.signals.push(...(rule.signals_bad || []));
+        out.severity = rule.severity_if_missing || "warn";
+      }
+      return out;
+    }
+
+    if (!ok) {
+      out.missing = true;
+      out.signals.push(`No cumple mínimo de líneas (${lines}/${minLines})`);
+      out.severity = "warn";
+    } else {
+      out.matched = true;
+      out.signals.push(`Cumple mínimo de líneas (${lines}/${minLines})`);
+      out.severity = "ok";
+    }
+    return out;
+  }
+
+  return out;
+}
+
+function evalRiskRules(answerNorm, defaults) {
+  const signals = [];
+  const ethics = [];
+  let worst = null; // bad > warn
+
+  const rules = Array.isArray(defaults?.risk_rules) ? defaults.risk_rules : [];
+  for (const rr of rules) {
+    const res = evalRuleGeneric(rr, answerNorm, answerNorm, defaults);
+    if (res.matched) {
+      signals.push(...(res.signals || []));
+      ethics.push(...(res.ethics || []));
+      if (rr.severity === "bad") worst = "bad";
+      else if (rr.severity === "warn" && worst !== "bad") worst = "warn";
+    }
+  }
+  return { signals: uniq(signals), ethics: uniq(ethics), severity: worst };
+}
+
+function pickOpinion(qConf, severity) {
+  const o = qConf?.opinions || {};
+  if (severity === "bad") return o.bad || o.warn || o.ok || "";
+  if (severity === "warn") return o.warn || o.ok || "";
+  return o.ok || "";
+}
+
+function evalOpenQ(qid, answer, config) {
+  const aTrim = safeStr(answer).trim();
+
+  // REGLA DURA 1: si vacío => NO completar (null)
+  if (!aTrim.length) return null;
+
+  if (!config || !config.questions || !config.questions[qid]) return null;
+
+  const defaults = config.defaults || {};
+  const qConf = config.questions[qid] || {};
+  const answerNorm = normalizeText(aTrim);
+
+  const signals = [];
+  const ethics = [];
+  let severity = "ok"; // ok | warn | bad
+
+  // Condición especial: texto corto
+  const shortMin = Number(qConf.short_min_chars ?? defaults.short_min_chars ?? 80);
+  if (aTrim.length < shortMin) {
+    signals.push("TEXTO_CORTO");
+    severity = "warn";
+  }
+
+  // Reglas específicas de la pregunta
+  const rules = Array.isArray(qConf.rules) ? qConf.rules : [];
+  for (const r of rules) {
+    const res = evalRuleGeneric(r, aTrim, answerNorm, defaults);
+    if ((res.signals || []).length) signals.push(...res.signals);
+    if ((res.ethics || []).length) ethics.push(...res.ethics);
+
+    if (res.severity === "bad") severity = "bad";
+    else if (res.severity === "warn" && severity !== "bad") severity = "warn";
+  }
+
+  // Riesgos globales (ética)
+  const risk = evalRiskRules(answerNorm, defaults);
+  if (risk.signals.length) signals.push(...risk.signals);
+  if (risk.ethics.length) ethics.push(...risk.ethics);
+  if (risk.severity === "bad") severity = "bad";
+  else if (risk.severity === "warn" && severity !== "bad") severity = "warn";
+
+  return {
+    signals: joinOrEmpty(uniq(signals)),
+    ethics: joinOrEmpty(uniq(ethics)),
+    opinion: pickOpinion(qConf, severity)
+  };
+}
+
+// Lock Q_ALTA (12)
+const Q_ALTA = ["Q1","Q9","Q13","Q14","Q15","Q18","Q21","Q22","Q23","Q27","Q30","Q31"];
+
+function headerFromQid(qid) {
+  const n = String(qid || "").replace(/^Q/i, "");
+  for (const h of EXPECTED_HEADERS) {
+    const m = String(h).match(/^(\d+)\/33\./);
+    if (m && m[1] === n) return h;
+  }
+  return null;
+}
+
+
+// ======================================================
 // ÍNDICE 12 — PARTE 2/3 (CERRADAS) = 13 preguntas fijas
 // - ESTADO (panel principal) sale SOLO de estas 13 (pct_ok)
 // - Estados permitidos: DESCARTADO_AUTO (<=69) / REVISAR_AUTO (>=70)
@@ -594,6 +778,9 @@ fileInput.addEventListener("change", async () => {
     ACTION_VERBS = await loadJSON("rules/action_verbs.json");
     GENERIC_WORDS = await loadJSON("rules/generic_words.json");
 
+    // NUEVO (best-effort): reglas informativas Parte 1/3
+    const OPEN_SIGNALS = await loadOpenSignalsOnce(); // si falla => null (no rompe)
+
     // Versionado
     let version = "—";
     try {
@@ -646,6 +833,21 @@ fileInput.addEventListener("change", async () => {
       // Motivo alineado a Parte 2/3
       const motivo = `Parte 2/3: ${closed_eval.pct_ok}% (válidas ${closed_eval.ok_count}/13)`;
 
+      // NUEVO: PARTE 1/3 (ABIERTAS ALTA) — informativo
+      // REGLA DURA 1: si respuesta vacía => no setea (queda vacío real)
+      // Si OPEN_SIGNALS es null => no completa nada
+      let open_ai = undefined;
+      if (OPEN_SIGNALS) {
+        const tmp = {};
+        for (const qid of Q_ALTA) {
+          const h = headerFromQid(qid);
+          const ans = h ? (obj[h] ?? "") : "";
+          const ev = evalOpenQ(qid, ans, OPEN_SIGNALS);
+          if (ev) tmp[qid] = ev;
+        }
+        if (Object.keys(tmp).length) open_ai = tmp;
+      }
+
       // CLAVE: Para que la TABLA PRINCIPAL muestre el % correcto en "Total",
       // usamos score=maxScore como (pct_ok/100).
       // Guardamos scoring completo aparte (sin romper nada).
@@ -669,7 +871,10 @@ fileInput.addEventListener("change", async () => {
         correct: correctAll,
         incorrect: incorrectAll,
         rowRaw: obj,
-        closed_eval
+        closed_eval,
+
+        // NUEVO (informativo Parte 1/3)
+        open_ai
       };
     });
 
