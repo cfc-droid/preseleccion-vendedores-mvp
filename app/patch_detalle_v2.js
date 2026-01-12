@@ -16,6 +16,9 @@
   const WRAP_ID = "detalleV2_wrap";
   const STYLE_ID = "detalleV2_style";
 
+  // LocalStorage (Parte 1/3 editable)
+  const LS_PREFIX_P13 = "p13_edit_v2";
+
   // -------------------------
   // Helpers
   // -------------------------
@@ -75,6 +78,18 @@
   function toPctTxt(n) {
     const v = Math.round(Number(n) * 100) / 100;
     return v.toFixed(2).replace(".", ",") + "%";
+  }
+
+  function tryGetLS(k) {
+    try { return localStorage.getItem(k); } catch (_) { return null; }
+  }
+
+  function trySetLS(k, v) {
+    try { localStorage.setItem(k, v); } catch (_) {}
+  }
+
+  function lsKeyP13(rowKey, qid, field) {
+    return `${LS_PREFIX_P13}__${rowKey}__${qid}__${field}`;
   }
 
   // -------------------------
@@ -195,6 +210,28 @@
         word-break: break-word;
       }
       #${WRAP_ID} td:nth-child(3){ max-width: 520px; }
+
+      /* Editables Parte 1/3 */
+      #${WRAP_ID} .p13inp{
+        width: 100%;
+        box-sizing: border-box;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.10);
+        color: inherit;
+        padding: 8px 10px;
+        border-radius: 10px;
+        outline: none;
+      }
+      #${WRAP_ID} .p13sel{
+        width: 100%;
+        box-sizing: border-box;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.10);
+        color: inherit;
+        padding: 8px 10px;
+        border-radius: 10px;
+        outline: none;
+      }
     `;
     document.head.appendChild(st);
   }
@@ -353,52 +390,315 @@
     return hits >= 2;
   }
 
-  function analyzeOpenAnswer(answerRaw, aux) {
-    const a = String(answerRaw ?? "").trim();
+  function emailLooksValid(s) {
+    const a = String(s ?? "").trim();
+    if (!a) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a);
+  }
+
+  function containsAny(text, arr) {
+    const t = normalizeText(text);
+    return (arr || []).some(x => t.includes(normalizeText(x)));
+  }
+
+  function countLinesNonEmpty(text) {
+    return String(text ?? "")
+      .split(/\r?\n/)
+      .map(x => x.trim())
+      .filter(Boolean).length;
+  }
+
+  // -------------------------
+  // ABIERTAS (Parte 1/3) — reglas según tu detalle
+  // -------------------------
+
+  function analyzeOpenAnswerByQuestion(qid, answerRaw, rowRaw, aux) {
+    const a0 = String(answerRaw ?? "");
+    const a = a0.trim();
+
     if (!a.length) {
       return { hasAnswer: false, senales: "", eticas: "", opinion: "" };
     }
 
+    const t = normalizeText(a);
     const signals = [];
     const ethics = [];
 
-    // Señales (mismas ideas que flags del sistema)
-    if (a.length < 120) signals.push("Texto corto (<120)");
-    if (aux && !hasActionVerb(a, aux.ACTION_VERBS)) signals.push("Sin verbos de acción");
-    if (aux && isGeneric(a, aux.GENERIC_WORDS)) signals.push("Texto genérico");
-    if (/ingres|ganar|rentab|facil|garant/i.test(a)) signals.push("Riesgo marketing (ganancias/garantías)");
-    if (aux && hasBanned(a, aux.BANNED_WORDS)) signals.push("Palabra prohibida detectada");
+    // Reglas “globales” (éticas fuertes)
+    const PROMISE_RE = /(ingres|ganar|rentab|retorn|garant|asegur|dinero facil|ingreso asegur|resultados garant)/i;
+    const SPAM_RE = /(spam|masivo|sin permiso|report|reporte|bloque|bane|ban)/i;
 
-    // Éticas (solo si aplica)
-    if (aux && hasBanned(a, aux.BANNED_WORDS)) ethics.push("BANNED: contiene palabra prohibida");
-    if (/ingres|ganar|rentab|facil|garant/i.test(a)) ethics.push("ÉTICA: posible promesa/ganancia/retorno");
-    if (/spam|masivo|grupos|sin permiso|report/i.test(a)) ethics.push("ÉTICA: riesgo spam / sin permiso");
+    const hasB = aux && hasBanned(a, aux.BANNED_WORDS);
+    if (hasB) ethics.push("BANNED: contiene palabra prohibida");
 
-    // Opinión IA (NO decide)
-    // - Si hay banned => NO VÁLIDA
-    // - Si hay muchas señales => REVISAR
-    // - Si hay pocas => VÁLIDA
-    let opinion = "VÁLIDA";
-    if (aux && hasBanned(a, aux.BANNED_WORDS)) opinion = "NO VÁLIDA";
-    else if (signals.length >= 2) opinion = "REVISAR";
+    const promise = PROMISE_RE.test(a);
+    if (promise) ethics.push("ÉTICA: posible promesa/ganancia/retorno");
 
-    const senalesTxt = signals.length ? `✔/⚠️ ${signals.join(" | ")}` : "✔ Respuesta sin señales negativas";
-    const eticasTxt = ethics.length ? ethics.join(" | ") : "—";
+    if (SPAM_RE.test(a)) ethics.push("ÉTICA: riesgo spam / sin permiso");
 
-    return {
-      hasAnswer: true,
-      senales: senalesTxt,
-      eticas: (eticasTxt === "—" ? "—" : eticasTxt),
-      opinion
-    };
+    // --------
+    // Q1
+    if (qid === "Q1") {
+      const mustPhrase = normalizeText("Entiendo que este modelo NO es un empleo y cobro solo por resultados");
+      const hasPhrase = t.includes(mustPhrase);
+      const hasAt = /@\w+/.test(a);
+      const hasCity = a.split("—").length >= 3 || a.split("-").length >= 3 || /\b(ciudad|buenos aires|caba|rosario|cordoba|mendoza|la plata|mar del plata)\b/i.test(a);
+
+      if (hasPhrase && hasAt && hasCity) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Contiene la frase pedida");
+        signals.push("Incluye @usuario y ciudad");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      if (!hasPhrase) signals.push("No escribió la frase (o está mal)");
+      if (!hasAt) signals.push("Falta @usuario");
+      if (!hasCity) signals.push("Falta ciudad");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q9
+    if (qid === "Q9") {
+      const mailForm = String(rowRaw?.["Dirección de correo electrónico"] ?? "").trim().toLowerCase();
+      const mailAns = String(a ?? "").trim().toLowerCase();
+
+      const okFormat = emailLooksValid(mailAns);
+      const okMatch = mailForm ? (mailAns === mailForm) : true;
+
+      if (okFormat && okMatch) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Email con formato real");
+        if (mailForm) signals.push("Coincide con el correo del formulario");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      if (!okFormat) signals.push("Email inválido (formato)");
+      if (!okMatch) signals.push("No coincide con el del formulario");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q13
+    if (qid === "Q13") {
+      const invalid = containsAny(a, ["de todo", "varias cosas", "mucho", "un poco de todo", "de todo un poco"]);
+      const tooShort = a.length < 15;
+      if (!invalid && !tooShort) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Menciona productos concretos");
+        if (promise) {
+          // si prometió ganancias acá, ética manda
+          return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
+        }
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+      signals.push("❌ Respuesta INCORRECTA");
+      if (invalid) signals.push("Genérico (no queda claro qué vendió)");
+      if (tooShort) signals.push("Texto muy corto / sin sustancia");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q14
+    if (qid === "Q14") {
+      const invalid = containsAny(a, ["por redes", "marketing", "internet", "redes"]) && a.length < 30;
+      const tooShort = a.length < 15;
+      if (!invalid && !tooShort) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Explica el método (DM, contenido, referidos, etc.)");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+      signals.push("❌ Respuesta INCORRECTA");
+      if (invalid) signals.push("Frase vacía (no explica proceso)");
+      if (tooShort) signals.push("Texto muy corto");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q15
+    if (qid === "Q15") {
+      const tooShort = a.length < 20;
+      const generic = aux ? isGeneric(a, aux.GENERIC_WORDS) : false;
+      if (!tooShort && !generic) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Relata experiencia real (coherente)");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+      signals.push("❌ Respuesta INCORRECTA");
+      if (generic) signals.push("Texto genérico / copia-pega");
+      if (tooShort) signals.push("Muy corto / sin info real");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q18
+    if (qid === "Q18") {
+      const nLines = countLinesNonEmpty(a);
+      const genericLine = containsAny(a, ["redes", "internet", "grupos"]) && !/http/i.test(a) && a.length < 60;
+
+      if (nLines >= 3 && !genericLine) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Incluye lugares concretos (mín. 3)");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      if (nLines < 3) signals.push("No cumple mínimo de 3 lugares (1 por línea)");
+      if (genericLine) signals.push("Demasiado genérico (sin lugares reales)");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q21
+    if (qid === "Q21") {
+      const mentionsNoSalary = /(no hay sueldo|sin sueldo|no sueldo|no existe sueldo)/i.test(a);
+      const mentionsCommission = /(comision|comisión|vende|venta)/i.test(a);
+      const mentionsRisk = /(riesgo|depende|esfuerzo|si vende|si genero ventas|si genera ventas)/i.test(a);
+      const mentionsFixed = /(sueldo fijo|fijo|garantia|garantía|asegurado)/i.test(a);
+
+      if (mentionsFixed) {
+        signals.push("❌ Respuesta INCORRECTA");
+        signals.push("Habla de sueldo/fijo/garantía (confunde el modelo)");
+        if (!ethics.length) ethics.push("ÉTICA: confusión grave del modelo (sueldo/fijo/garantía)");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
+      }
+
+      if (mentionsNoSalary && mentionsCommission && mentionsRisk) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Entiende: no hay sueldo, cobra solo si vende, asume riesgo");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      signals.push("No demuestra comprensión completa del modelo");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q22
+    if (qid === "Q22") {
+      const hasNumbers = /\d/.test(a);
+      const okEthic = /(depende|esfuerzo|resultados|no puedo prometer|no garantizo|no hay garantias)/i.test(a) && !hasNumbers && !promise;
+
+      if (okEthic) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("No promete cifras y mantiene ética");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      // si hay promesa/garantía/números -> ética fuerte
+      if (promise || hasNumbers || /(asegur|garant|fijo)/i.test(a)) {
+        signals.push("❌ Respuesta INCORRECTA");
+        signals.push("Promete o sugiere resultados/cifras");
+        if (!ethics.length) ethics.push("ÉTICA: posible promesa/ganancia/retorno");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      signals.push("No deja claro que depende del esfuerzo (sin promesas)");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q23
+    if (qid === "Q23") {
+      const ok = containsAny(a, ["no promesas", "no prometer", "no dinero facil", "no garantias", "no garantía", "no retorno", "no resultados garantizados", "sin promesas"]);
+      const bad = promise || containsAny(a, ["te aseguro", "garantizo", "gana seguro", "dinero rapido"]);
+
+      if (ok && !bad) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Menciona: no promesas / no garantías / ética");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      if (bad) {
+        signals.push("❌ Respuesta INCORRECTA");
+        signals.push("Incluye promesas / expectativas falsas");
+        if (!ethics.length) ethics.push("ÉTICA: posible promesa/ganancia/retorno");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      signals.push("No queda alineado con reglas éticas");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q27
+    if (qid === "Q27") {
+      const tooShort = a.length < 40;
+      const bad = promise || containsAny(a, ["garant", "asegur", "dinero rapido", "gana ya"]);
+      const ok = !tooShort && !bad;
+
+      if (ok) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("DM usable, responsable, sin promesas");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      if (bad) {
+        signals.push("❌ Respuesta INCORRECTA");
+        signals.push("Incluye promesas / marketing agresivo");
+        if (!ethics.length) ethics.push("ÉTICA: posible promesa/ganancia/retorno");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      if (tooShort) signals.push("Demasiado corto / incompleto");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q30
+    if (qid === "Q30") {
+      const hasVerb = aux ? hasActionVerb(a, aux.ACTION_VERBS) : false;
+      const hasSteps = /(^|\n)\s*(1[\)\.\-]|2[\)\.\-]|3[\)\.\-])/.test(a) || countLinesNonEmpty(a) >= 3;
+
+      if (hasVerb && hasSteps) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Acciones concretas, paso a paso");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      signals.push("Poco concreto (relleno / sin pasos claros)");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // --------
+    // Q31
+    if (qid === "Q31") {
+      const tooShort = a.length < 20;
+      const ego = containsAny(a, ["soy el mejor", "soy el numero 1", "nadie como yo", "soy perfecto", "soy el mas"]);
+      const ok = !tooShort && !ego;
+
+      if (ok) {
+        signals.push("✔ Respuesta VÁLIDA");
+        signals.push("Argumenta con lógica (sin sobreventa)");
+        return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
+      }
+
+      signals.push("❌ Respuesta INCORRECTA");
+      if (tooShort) signals.push("Muy corto / no argumenta");
+      if (ego) signals.push("Ego inflado / sobreventa");
+      return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
+    }
+
+    // fallback (no debería pasar)
+    signals.push("✔ Respuesta con contenido");
+    return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
   }
 
   // -------------------------
-  // Render Parte 1/3 (ABIERTAS ALTA) — AHORA SÍ LLENA 3 columnas automáticas
+  // Render Parte 1/3 (ABIERTAS ALTA)
+  // - 3 columnas automáticas por regla de pregunta
+  // - 2 columnas editables (observación + porcentaje 0/8,33)
   // -------------------------
 
-  async function renderParte13(rowRaw) {
-    const pct = pctFixed(1, 12);
+  async function renderParte13(rowRaw, rowKey) {
+    const pctFixedTxt = pctFixed(1, 12); // "8,33%"
     const aux = await loadAuxOnce();
 
     const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
@@ -410,11 +710,18 @@
       const ans = safeVal(ansRaw);
 
       // SOLO si hay respuesta: llenar 3 columnas automáticas
-      const a = analyzeOpenAnswer(ansRaw, aux);
+      const a = analyzeOpenAnswerByQuestion(qid, ansRaw, rowRaw, aux);
 
       const senales = a.hasAnswer ? a.senales : "";
-      const eticas = a.hasAnswer ? (a.eticas === "—" ? "—" : a.eticas) : "";
+      const eticas = a.hasAnswer ? (a.eticas ? a.eticas : "—") : "";
       const opinion = a.hasAnswer ? a.opinion : "";
+
+      // Editables: obs + pct (solo 0 o 8,33%)
+      const obsLS = tryGetLS(lsKeyP13(rowKey, qid, "obs")) ?? "";
+      const pctLS = tryGetLS(lsKeyP13(rowKey, qid, "pct")) ?? "0";
+
+      const obsId = `p13_obs_${idx}_${Math.random().toString(16).slice(2)}`;
+      const pctId = `p13_pct_${idx}_${Math.random().toString(16).slice(2)}`;
 
       return `
         <tr>
@@ -424,8 +731,30 @@
           <td>${esc(senales)}</td>
           <td>${esc(eticas)}</td>
           <td><b>${esc(opinion)}</b></td>
-          <td>—</td>
-          <td>${pct}</td>
+          <td>
+            <input
+              class="p13inp"
+              id="${esc(obsId)}"
+              data-p13-field="obs"
+              data-rowkey="${esc(rowKey)}"
+              data-qid="${esc(qid)}"
+              type="text"
+              value="${esc(obsLS)}"
+              placeholder="(editable)"
+            />
+          </td>
+          <td>
+            <select
+              class="p13sel"
+              id="${esc(pctId)}"
+              data-p13-field="pct"
+              data-rowkey="${esc(rowKey)}"
+              data-qid="${esc(qid)}"
+            >
+              <option value="0"${pctLS === "0" ? " selected" : ""}>0</option>
+              <option value="${esc(pctFixedTxt)}"${pctLS === pctFixedTxt ? " selected" : ""}>${esc(pctFixedTxt)}</option>
+            </select>
+          </td>
         </tr>
       `;
     }).join("");
@@ -443,8 +772,8 @@
                 <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
                 <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
                 <th style="width:160px;">OPINIÓN IA (NO decide)</th>
-                <th style="width:180px;">OBSERVACIÓN HUMANA</th>
-                <th style="width:110px;">PORCENTAJE</th>
+                <th style="width:220px;">OBSERVACIÓN HUMANA</th>
+                <th style="width:140px;">PORCENTAJE</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -452,6 +781,40 @@
         </div>
       </div>
     `;
+  }
+
+  function bindParte13Editors(root) {
+    if (!root) return;
+
+    const els = [...root.querySelectorAll("[data-p13-field]")];
+    for (const el of els) {
+      const field = el.getAttribute("data-p13-field");
+      const rowKey = el.getAttribute("data-rowkey") || "";
+      const qid = el.getAttribute("data-qid") || "";
+      const k = lsKeyP13(rowKey, qid, field);
+
+      const handler = () => {
+        const v = (el.tagName === "SELECT") ? String(el.value ?? "") : String(el.value ?? "");
+        // pct solo 0 o 8,33%
+        if (field === "pct") {
+          const allowedA = "0";
+          const allowedB = pctFixed(1, 12); // "8,33%"
+          if (v !== allowedA && v !== allowedB) {
+            el.value = allowedA;
+            trySetLS(k, allowedA);
+            return;
+          }
+        }
+        trySetLS(k, v);
+      };
+
+      // prevenir doble bind
+      if (el.getAttribute("data-p13-bound") === "1") continue;
+      el.setAttribute("data-p13-bound", "1");
+
+      el.addEventListener("input", handler);
+      el.addEventListener("change", handler);
+    }
   }
 
   // -------------------------
@@ -631,7 +994,11 @@
     const rowKey = buildRowKey(rowRaw);
     const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
     const existingWrap = panel.querySelector(`#${WRAP_ID}`);
-    if (prevKey === rowKey && existingWrap) return;
+    if (prevKey === rowKey && existingWrap) {
+      // Igual key, pero aseguro bind de editores (por si el DOM se re-creó)
+      bindParte13Editors(existingWrap);
+      return;
+    }
 
     if (existingWrap) existingWrap.remove();
 
@@ -643,7 +1010,7 @@
     const wrap = document.createElement("div");
     wrap.id = WRAP_ID;
 
-    const parte13 = await renderParte13(rowRaw);
+    const parte13 = await renderParte13(rowRaw, rowKey);
     const parte23 = await renderParte23(rowRaw);
 
     wrap.innerHTML = `
@@ -654,6 +1021,9 @@
 
     jsonDiv.parentNode.insertBefore(wrap, jsonDiv);
     panel.setAttribute(PATCH_KEY_ATTR, rowKey);
+
+    // Bind editores Parte 1/3
+    bindParte13Editors(wrap);
   }
 
   // -------------------------
