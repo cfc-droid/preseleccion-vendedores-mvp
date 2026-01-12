@@ -692,7 +692,34 @@
   }
 
   // -------------------------
+  // RESUMEN PARTE 1/3 (tabla arriba) — estilo Imagen 1
+  // Cambia en tiempo real (al cambiar de fila/detalle, el patch re-renderiza)
+  // -------------------------
+
+  function computeParte13Stats(rowRaw, aux) {
+    const total = Q_ABIERTAS_ALTA.length; // (fijo por definición de Parte 1/3)
+    let validas = 0;
+
+    for (const qid of Q_ABIERTAS_ALTA) {
+      const header = QID_TO_HEADER[qid];
+      const ansRaw = rowRaw?.[header];
+      const a = analyzeOpenAnswerByQuestion(qid, ansRaw, rowRaw, aux);
+      if (a.hasAnswer && a.opinion === "VÁLIDA") validas++;
+    }
+
+    const incorrectas = total - validas;
+
+    const pctValid = total ? Math.round((validas / total) * 100) : 0;
+    const pctInc = total ? Math.round((incorrectas / total) * 100) : 0;
+
+    const estadoDef = (pctValid >= 70) ? "APROBADO" : "NO VALIDO";
+
+    return { total, validas, incorrectas, pctValid, pctInc, estadoDef };
+  }
+
+  // -------------------------
   // Render Parte 1/3 (ABIERTAS ALTA)
+  // - AGREGA resumen arriba (Imagen 1)
   // - 3 columnas automáticas por regla de pregunta
   // - 2 columnas editables (observación + porcentaje 0/8,33)
   // -------------------------
@@ -700,6 +727,8 @@
   async function renderParte13(rowRaw, rowKey) {
     const pctFixedTxt = pctFixed(1, 12); // "8,33%"
     const aux = await loadAuxOnce();
+
+    const stats = computeParte13Stats(rowRaw, aux);
 
     const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
@@ -760,6 +789,47 @@
     }).join("");
 
     return `
+      <div class="miniCard" style="margin-top:14px;">
+        <div class="sectionTitle">RESUMEN — PARTE 1/3</div>
+
+        <div style="overflow:auto; margin-top:10px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="min-width:260px;">RESUMEN — PARTE 1/3</th>
+                <th style="width:120px;">CANTIDAD</th>
+                <th style="width:120px;">PORCENTAJE</th>
+                <th style="width:220px;">ESTADO DEFINITIVO</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>TOTAL DE PREGUNTAS</b></td>
+                <td>${stats.total}</td>
+                <td>100%</td>
+                <td>—</td>
+              </tr>
+              <tr>
+                <td><b>RESPUESTAS VÁLIDAS</b></td>
+                <td>${stats.validas}</td>
+                <td>${stats.pctValid}%</td>
+                <td><b>${esc(stats.estadoDef)}</b></td>
+              </tr>
+              <tr>
+                <td><b>RESPUESTAS INCORRECTAS</b></td>
+                <td>${stats.incorrectas}</td>
+                <td>${stats.pctInc}%</td>
+                <td>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="muted" style="margin-top:8px;">
+          APROBADO = igual o mayor a 70% | NO VALIDO = menor a 70%.
+        </div>
+      </div>
+
       <div class="miniCard" style="margin-top:14px;">
         <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
         <div style="overflow:auto; margin-top:10px;">
