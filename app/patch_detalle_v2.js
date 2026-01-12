@@ -2,18 +2,11 @@
 // PATCH DETALLE V2 (SIN TOCAR ui.js)
 // - Renderiza 3 partes del detalle estilo mock
 // - Parte 2/3 (13 cerradas): usa rules/rules_v1.json
-//
-// ✅ NUEVO (TU PEDIDO):
-// PARTE 1/3:
-// A) Completa AUTOMÁTICO 3 columnas SOLO si hay respuesta:
-//    - Señales detectadas (válida rta)
-//    - Reglas éticas afectadas (si aplica)
-//    - Opinión IA (NO decide)
-// B1) Permite editar 2 columnas (Observación humana + Porcentaje) y guardar localStorage
-// B2) Agrega TABLA RESUMEN Parte 1/3:
-//    - ≥70% => APROBADO | <70% => NO VALIDO
-//
-// Nota: no crea archivos nuevos.
+// - Parte 1/3 (12 abiertas): COMPLETA 3 columnas automáticas
+//   * SEÑALES DETECTADAS (VÁLIDA RTA)
+//   * REGLAS ÉTICAS AFECTADAS (si aplica)
+//   * OPINIÓN IA (NO decide)
+//   SOLO si hay respuesta del vendedor. Si no hay respuesta => vacío.
 // =====================================================
 
 (() => {
@@ -22,9 +15,6 @@
   const PATCH_KEY_ATTR = "data-patched-v2-key";
   const WRAP_ID = "detalleV2_wrap";
   const STYLE_ID = "detalleV2_style";
-
-  // LocalStorage para Parte 1/3 (humano)
-  const LS_P13_KEY = "cfc_preseleccion_p13_v1";
 
   // -------------------------
   // Helpers
@@ -42,6 +32,10 @@
   function safeVal(v) {
     const s = String(v ?? "").trim();
     return s.length ? s : "—";
+  }
+
+  function isBlank(v) {
+    return !String(v ?? "").trim().length;
   }
 
   function norm(s) {
@@ -81,58 +75,6 @@
   function toPctTxt(n) {
     const v = Math.round(Number(n) * 100) / 100;
     return v.toFixed(2).replace(".", ",") + "%";
-  }
-
-  function parsePctInputToNumber(txt) {
-    // acepta "8,33" "8.33" "8,33%" "8.33%"
-    const s = String(txt ?? "").trim().replace("%", "").replace(",", ".");
-    const n = Number(s);
-    if (!isFinite(n) || n < 0) return 0;
-    return Math.min(100, n);
-  }
-
-  // -------------------------
-  // Storage Parte 1/3 humano
-  // -------------------------
-
-  function loadP13Store() {
-    try {
-      const raw = localStorage.getItem(LS_P13_KEY);
-      const obj = raw ? JSON.parse(raw) : {};
-      return (obj && typeof obj === "object") ? obj : {};
-    } catch (_) {
-      return {};
-    }
-  }
-
-  function saveP13Store(store) {
-    try {
-      localStorage.setItem(LS_P13_KEY, JSON.stringify(store || {}));
-    } catch (_) {}
-  }
-
-  function getP13Row(store, rowKey) {
-    if (!store[rowKey]) store[rowKey] = { obs: {}, pct: {}, total_pct: 0, estado_def: "" };
-    if (!store[rowKey].obs) store[rowKey].obs = {};
-    if (!store[rowKey].pct) store[rowKey].pct = {};
-    return store[rowKey];
-  }
-
-  function computeP13TotalFromRow(p13Row) {
-    // SUMA de porcentajes por pregunta (lo definís vos con tu input)
-    // Si no cargás nada => 0
-    const pctObj = p13Row?.pct || {};
-    let sum = 0;
-    for (const v of Object.values(pctObj)) sum += parsePctInputToNumber(v);
-    sum = Math.max(0, Math.min(100, Math.round(sum * 100) / 100));
-    const estado = (sum >= 70) ? "APROBADO" : "NO VALIDO";
-    return { total: sum, estado };
-  }
-
-  function emitP13Updated(rowKey) {
-    try {
-      window.dispatchEvent(new CustomEvent("psv:p13updated", { detail: { rowKey } }));
-    } catch (_) {}
   }
 
   // -------------------------
@@ -253,40 +195,12 @@
         word-break: break-word;
       }
       #${WRAP_ID} td:nth-child(3){ max-width: 520px; }
-
-      /* Inputs Parte 1/3 */
-      #${WRAP_ID} .p13InputObs{
-        width: 100%;
-        min-height: 34px;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: rgba(255,255,255,0.03);
-        color: var(--text);
-        padding: 8px;
-        font-family: var(--font) !important;
-        font-size: 12px;
-      }
-      #${WRAP_ID} .p13InputPct{
-        width: 110px;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: rgba(255,255,255,0.03);
-        color: var(--text);
-        padding: 8px;
-        font-family: var(--font) !important;
-        font-size: 12px;
-      }
-      #${WRAP_ID} .p13Hint{
-        font-size: 12px;
-        color: var(--muted);
-        margin-top: 8px;
-      }
     `;
     document.head.appendChild(st);
   }
 
   // -------------------------
-  // Cargar rules una vez
+  // Cargar rules una vez (cerradas)
   // -------------------------
 
   let _RULES_CACHE = null;
@@ -391,130 +305,134 @@
   }
 
   // -------------------------
-  // Render Parte 1/3 (✅ AJUSTADO A TU PEDIDO)
+  // Cargar auxiliares (abiertas) — mismos archivos existentes
   // -------------------------
 
-  function inferEstadoPorHeader(header, correctList, incorrectList) {
-    const h = canonHeader(header);
-    const ok = correctList.some(x => x.includes(h));
-    const bad =
-      incorrectList.some(x => x.includes(h)) ||
-      incorrectList.some(x => x.includes("FALLA") && x.includes(headerNumber(header) ? `${headerNumber(header)}/33` : ""));
-    if (bad) return "INCORRECTA";
-    if (ok) return "CORRECTA";
-    return "—";
+  let _AUX_CACHE = null;
+
+  async function loadAuxOnce() {
+    if (_AUX_CACHE) return _AUX_CACHE;
+
+    const safeLoad = async (path) => {
+      try {
+        const res = await fetch(path);
+        if (!res.ok) return [];
+        const json = await res.json();
+        return Array.isArray(json) ? json : [];
+      } catch (_) {
+        return [];
+      }
+    };
+
+    const [BANNED_WORDS, ACTION_VERBS, GENERIC_WORDS] = await Promise.all([
+      safeLoad("rules/banned_words.json"),
+      safeLoad("rules/action_verbs.json"),
+      safeLoad("rules/generic_words.json")
+    ]);
+
+    _AUX_CACHE = { BANNED_WORDS, ACTION_VERBS, GENERIC_WORDS };
+    return _AUX_CACHE;
   }
 
-  function inferJustificacion(header, correctList, incorrectList) {
-    const h = canonHeader(header);
-    const hitBad = incorrectList.find(x => x.includes(h));
-    const hitOk = correctList.find(x => x.includes(h));
-    if (hitBad) return hitBad;
-    if (hitOk) return hitOk;
-    return "—";
+  function hasBanned(text, BANNED_WORDS) {
+    const t = normalizeText(text);
+    return (BANNED_WORDS || []).some(w => t.includes(normalizeText(w)));
   }
 
-  function buildRowKey(rowRaw) {
-    const mt = safeVal(rowRaw?.["Marca temporal"]);
-    const em = safeVal(rowRaw?.["Dirección de correo electrónico"]);
-    return `${mt}__${em}`;
+  function hasActionVerb(text, ACTION_VERBS) {
+    const t = normalizeText(text);
+    return (ACTION_VERBS || []).some(v => t.includes(normalizeText(v)));
   }
 
-  function renderParte13(rowRaw, correctList, incorrectList) {
-    const pctFixedPerQ = pctFixed(1, 12);
-    const rowKey = buildRowKey(rowRaw);
+  function isGeneric(text, GENERIC_WORDS) {
+    const t = normalizeText(text);
+    let hits = 0;
+    for (const w of (GENERIC_WORDS || [])) {
+      if (t.includes(normalizeText(w))) hits++;
+    }
+    return hits >= 2;
+  }
 
-    // Traer lo humano guardado
-    const store = loadP13Store();
-    const p13Row = getP13Row(store, rowKey);
+  function analyzeOpenAnswer(answerRaw, aux) {
+    const a = String(answerRaw ?? "").trim();
+    if (!a.length) {
+      return { hasAnswer: false, senales: "", eticas: "", opinion: "" };
+    }
+
+    const signals = [];
+    const ethics = [];
+
+    // Señales (mismas ideas que flags del sistema)
+    if (a.length < 120) signals.push("Texto corto (<120)");
+    if (aux && !hasActionVerb(a, aux.ACTION_VERBS)) signals.push("Sin verbos de acción");
+    if (aux && isGeneric(a, aux.GENERIC_WORDS)) signals.push("Texto genérico");
+    if (/ingres|ganar|rentab|facil|garant/i.test(a)) signals.push("Riesgo marketing (ganancias/garantías)");
+    if (aux && hasBanned(a, aux.BANNED_WORDS)) signals.push("Palabra prohibida detectada");
+
+    // Éticas (solo si aplica)
+    if (aux && hasBanned(a, aux.BANNED_WORDS)) ethics.push("BANNED: contiene palabra prohibida");
+    if (/ingres|ganar|rentab|facil|garant/i.test(a)) ethics.push("ÉTICA: posible promesa/ganancia/retorno");
+    if (/spam|masivo|grupos|sin permiso|report/i.test(a)) ethics.push("ÉTICA: riesgo spam / sin permiso");
+
+    // Opinión IA (NO decide)
+    // - Si hay banned => NO VÁLIDA
+    // - Si hay muchas señales => REVISAR
+    // - Si hay pocas => VÁLIDA
+    let opinion = "VÁLIDA";
+    if (aux && hasBanned(a, aux.BANNED_WORDS)) opinion = "NO VÁLIDA";
+    else if (signals.length >= 2) opinion = "REVISAR";
+
+    const senalesTxt = signals.length ? `✔/⚠️ ${signals.join(" | ")}` : "✔ Respuesta sin señales negativas";
+    const eticasTxt = ethics.length ? ethics.join(" | ") : "—";
+
+    return {
+      hasAnswer: true,
+      senales: senalesTxt,
+      eticas: (eticasTxt === "—" ? "—" : eticasTxt),
+      opinion
+    };
+  }
+
+  // -------------------------
+  // Render Parte 1/3 (ABIERTAS ALTA) — AHORA SÍ LLENA 3 columnas automáticas
+  // -------------------------
+
+  async function renderParte13(rowRaw) {
+    const pct = pctFixed(1, 12);
+    const aux = await loadAuxOnce();
 
     const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
       const qnum = headerNumber(header) + "/33";
       const pregunta = questionTextFromHeader(header);
 
-      const ansRaw = String(rowRaw?.[header] ?? "");
-      const ansTrim = ansRaw.trim();
+      const ansRaw = rowRaw?.[header];
       const ans = safeVal(ansRaw);
 
-      // Regla A: si NO hay respuesta => 3 columnas automáticas VACÍAS
-      let senales = "";
-      let eticas = "";
-      let opinion = "";
+      // SOLO si hay respuesta: llenar 3 columnas automáticas
+      const a = analyzeOpenAnswer(ansRaw, aux);
 
-      if (ansTrim.length) {
-        const estadoAuto = inferEstadoPorHeader(header, correctList, incorrectList);
-
-        // Señales
-        if (estadoAuto === "CORRECTA") senales = "✔ Respuesta VÁLIDA (señales automáticas)";
-        else if (estadoAuto === "INCORRECTA") senales = "✖ Respuesta NO VÁLIDA (señales automáticas)";
-        else senales = "—";
-
-        // Reglas éticas (si aplica)
-        const incHit = inferJustificacion(header, correctList, incorrectList);
-        const incHitLow = String(incHit || "").toLowerCase();
-
-        // criterio simple: si hay una falla / banned / marketing / prohib => lo mostramos
-        if (estadoAuto === "INCORRECTA" && (incHitLow.includes("banned") || incHitLow.includes("marketing") || incHitLow.includes("prohib") || incHitLow.includes("falla"))) {
-          eticas = incHit;
-        } else {
-          eticas = "—";
-        }
-
-        // Opinión IA (NO decide): SOLO opinión del sistema, sin “decidir”
-        if (estadoAuto === "CORRECTA") opinion = "VÁLIDA (no decide)";
-        else if (estadoAuto === "INCORRECTA") opinion = "NO VÁLIDA (no decide)";
-        else opinion = "—";
-      }
-
-      // Inputs humanos
-      const obsVal = String(p13Row.obs?.[qid] ?? "");
-      const pctVal = String(p13Row.pct?.[qid] ?? "");
+      const senales = a.hasAnswer ? a.senales : "";
+      const eticas = a.hasAnswer ? (a.eticas === "—" ? "—" : a.eticas) : "";
+      const opinion = a.hasAnswer ? a.opinion : "";
 
       return `
         <tr>
           <td>${idx + 1}</td>
           <td><span class="kbd">${esc(qnum)}</span> ${esc(pregunta)}</td>
           <td>${esc(ans)}</td>
-
           <td>${esc(senales)}</td>
           <td>${esc(eticas)}</td>
           <td><b>${esc(opinion)}</b></td>
-
-          <td>
-            <textarea
-              class="p13InputObs"
-              data-p13="obs"
-              data-rowkey="${esc(rowKey)}"
-              data-qid="${esc(qid)}"
-              placeholder="(solo vos) Observación humana..."
-            >${esc(obsVal)}</textarea>
-          </td>
-
-          <td>
-            <input
-              class="p13InputPct"
-              data-p13="pct"
-              data-rowkey="${esc(rowKey)}"
-              data-qid="${esc(qid)}"
-              inputmode="decimal"
-              placeholder="ej: 8,33"
-              value="${esc(pctVal)}"
-            />
-            <div class="p13Hint">Referencia: ${esc(pctFixedPerQ)} por pregunta (si usás reparto fijo)</div>
-          </td>
+          <td>—</td>
+          <td>${pct}</td>
         </tr>
       `;
     }).join("");
 
-    // Summary Parte 1/3 (B2)
-    const totals = computeP13TotalFromRow(p13Row);
-    const totalPctTxt = toPctTxt(totals.total);
-
     return `
       <div class="miniCard" style="margin-top:14px;">
         <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
-
         <div style="overflow:auto; margin-top:10px;">
           <table class="table">
             <thead>
@@ -524,51 +442,20 @@
                 <th style="width:360px;">RESPUESTA DEL VENDEDOR</th>
                 <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
                 <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
-                <th style="width:180px;">OPINIÓN IA (NO decide)</th>
-                <th style="width:260px;">OBSERVACIÓN HUMANA</th>
-                <th style="width:160px;">PORCENTAJE</th>
+                <th style="width:160px;">OPINIÓN IA (NO decide)</th>
+                <th style="width:180px;">OBSERVACIÓN HUMANA</th>
+                <th style="width:110px;">PORCENTAJE</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>
-        </div>
-
-        <div style="margin-top:12px; overflow:auto;">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>RESUMEN — PARTE 1/3</th>
-                <th style="width:120px;">UNIDAD</th>
-                <th style="width:140px;">PORCENTAJE</th>
-                <th style="width:180px;">ESTADO (definitivo)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><b>TOTAL DE PREGUNTAS</b></td>
-                <td>12</td>
-                <td>100%</td>
-                <td>—</td>
-              </tr>
-              <tr>
-                <td><b>RESULTADO DEFINITIVO</b> (suma de tus porcentajes)</td>
-                <td>—</td>
-                <td><b>${esc(totalPctTxt)}</b></td>
-                <td><b>${esc(totals.estado)}</b></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="p13Hint" style="margin-top:10px;">
-          Regla Parte 1/3: <b>≥70% = APROBADO</b> | <b>&lt;70% = NO VALIDO</b>. (Lo define TU porcentaje manual)
         </div>
       </div>
     `;
   }
 
   // -------------------------
-  // Render Parte 2/3 (CORREGIDA: puntaje+justificación estricta)
+  // Render Parte 2/3 (CERRADAS) — igual que antes
   // -------------------------
 
   async function renderParte23(rowRaw) {
@@ -582,13 +469,15 @@
       const respRaw = String(rowRaw?.[header] ?? "");
       const resp = safeVal(respRaw);
 
-      const ev = RULES ? evalClosedOkByRules(RULES, header, respRaw) : { hasAnswer: !!respRaw.trim(), isOk: false, whyCore: "no se cargaron reglas" };
+      const ev = RULES
+        ? evalClosedOkByRules(RULES, header, respRaw)
+        : { hasAnswer: !!respRaw.trim(), isOk: false, whyCore: "no se cargaron reglas" };
 
       // Puntaje SOLO si hay respuesta
       const puntaje = ev.hasAnswer ? (ev.isOk ? pct : "0") : "";
       const just = ev.hasAnswer ? closedJustificationStrict(respRaw, ev.isOk, ev.whyCore) : "";
 
-      return { idx, qnum, pregunta, resp, hasAnswer: ev.hasAnswer, isOk: ev.isOk, puntaje, just };
+      return { idx, qnum, pregunta, resp, isOk: ev.isOk, puntaje, just };
     });
 
     const total = 13;
@@ -715,53 +604,13 @@
   }
 
   // -------------------------
-  // Bind inputs Parte 1/3
+  // RowKey
   // -------------------------
 
-  function bindP13Inputs(wrap) {
-    if (!wrap) return;
-
-    const store = loadP13Store();
-
-    // OBS
-    wrap.querySelectorAll("textarea[data-p13='obs']").forEach(el => {
-      el.addEventListener("input", () => {
-        const rowKey = el.getAttribute("data-rowkey") || "";
-        const qid = el.getAttribute("data-qid") || "";
-        const p13Row = getP13Row(store, rowKey);
-
-        p13Row.obs[qid] = el.value || "";
-
-        const totals = computeP13TotalFromRow(p13Row);
-        p13Row.total_pct = totals.total;
-        p13Row.estado_def = totals.estado;
-
-        saveP13Store(store);
-        emitP13Updated(rowKey);
-      });
-    });
-
-    // PCT
-    wrap.querySelectorAll("input[data-p13='pct']").forEach(el => {
-      const handler = () => {
-        const rowKey = el.getAttribute("data-rowkey") || "";
-        const qid = el.getAttribute("data-qid") || "";
-        const p13Row = getP13Row(store, rowKey);
-
-        p13Row.pct[qid] = el.value || "";
-
-        const totals = computeP13TotalFromRow(p13Row);
-        p13Row.total_pct = totals.total;
-        p13Row.estado_def = totals.estado;
-
-        saveP13Store(store);
-        emitP13Updated(rowKey);
-      };
-
-      el.addEventListener("input", handler);
-      el.addEventListener("change", handler);
-      el.addEventListener("blur", handler);
-    });
+  function buildRowKey(rowRaw) {
+    const mt = safeVal(rowRaw?.["Marca temporal"]);
+    const em = safeVal(rowRaw?.["Dirección de correo electrónico"]);
+    return `${mt}__${em}`;
   }
 
   // -------------------------
@@ -786,10 +635,6 @@
 
     if (existingWrap) existingWrap.remove();
 
-    // correct/incorrect siguen existiendo para Parte 1/3
-    const correctList = extractList(panel, "CORRECTAS");
-    const incorrectList = extractList(panel, "INCORRECTAS");
-
     // Insertar antes del JSON final
     const allDivs = [...panel.querySelectorAll("div")];
     const jsonDiv = allDivs.find(d => (d.textContent || "").trim().startsWith("{") && (d.textContent || "").includes('"Marca temporal"'));
@@ -798,19 +643,17 @@
     const wrap = document.createElement("div");
     wrap.id = WRAP_ID;
 
+    const parte13 = await renderParte13(rowRaw);
     const parte23 = await renderParte23(rowRaw);
 
     wrap.innerHTML = `
-      ${renderParte13(rowRaw, correctList, incorrectList)}
+      ${parte13}
       ${parte23}
       ${renderParte33(rowRaw)}
     `;
 
     jsonDiv.parentNode.insertBefore(wrap, jsonDiv);
     panel.setAttribute(PATCH_KEY_ATTR, rowKey);
-
-    // Bind inputs (importante: después del insert)
-    bindP13Inputs(wrap);
   }
 
   // -------------------------
