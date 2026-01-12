@@ -1,9 +1,9 @@
-// =====================================================
-// PATCH DETALLE V3 — FIX UI (SIN TOCAR ui.js / app.js)
+ // =====================================================
+// PATCH DETALLE V3.1 — FIX UI (SIN TOCAR ui.js / app.js)
 // =====================================================
 // FIXES:
-// 1) Evita duplicado Parte 1/3 (lock anti-concurrencia + limpieza agresiva)
-// 2) Fuerza SCROLL horizontal/vertical (sin estirar la página a la derecha)
+// 1) Parte 1/3 NO desaparece (no se oculta nuestro wrap)
+// 2) Scroll horizontal/vertical REAL en tablas (sin estirar la página)
 // 3) Oculta cajas "Respuestas/condiciones CORRECTAS" y "INCORRECTAS (por qué)"
 // 4) Parte 2/3: resumen arriba, luego tabla 13 preguntas
 // 5) Parte 3/3: oculta columna "Largo"
@@ -134,7 +134,7 @@
     panel.querySelectorAll(`#${WRAP_ID}`).forEach(n => n.remove());
   };
 
-  // Oculta cualquier “Parte 1/3 vieja” aunque no esté dentro de .miniCard
+  // Oculta SOLO la Parte 1/3 vieja (pero jamás nuestra Parte 1/3 nueva)
   const hideOldParte13Everywhere = panel => {
     // Caso 1: miniCards
     panel.querySelectorAll(".miniCard").forEach(c => {
@@ -143,10 +143,13 @@
       if (t.startsWith("parte 1/3")) c.style.display = "none";
     });
 
-    // Caso 2: títulos sueltos (no miniCard)
+    // Caso 2: sectionTitle sueltos
     panel.querySelectorAll(".sectionTitle").forEach(st => {
       const t = norm(st.textContent || "");
       if (!t.startsWith("parte 1/3")) return;
+
+      // Si pertenece a nuestro wrap, NO tocar
+      if (st.closest(`#${WRAP_ID}`)) return;
 
       const mc = st.closest(".miniCard");
       if (mc && mc.id !== WRAP_ID) {
@@ -154,12 +157,9 @@
         return;
       }
 
-      // Si no hay miniCard, ocultamos el bloque contenedor cercano
-      const block =
-        st.closest("div") ||
-        st.parentElement;
-
-      if (block && block.id !== WRAP_ID) block.style.display = "none";
+      // Si no hay miniCard, ocultar un contenedor razonable (no el propio st)
+      const container = st.parentElement;
+      if (container && container.id !== WRAP_ID) container.style.display = "none";
     });
   };
 
@@ -189,7 +189,7 @@
     }) || null;
   };
 
-  /* ================= STYLES (SCROLL REAL + NO STRETCH) ================= */
+  /* ================= STYLES (SCROLL REAL) ================= */
 
   const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return;
@@ -197,40 +197,31 @@
     s.id = STYLE_ID;
 
     s.textContent = `
-      /* 1) Evitar que el body/página se estire a la derecha */
-      html, body { overflow-x: hidden !important; }
-
-      /* 2) Detail panel: NO pre-wrap gigante + permitir scroll interno */
+      /* No estires el layout: el scroll debe ocurrir en wrappers */
       #${DETAIL_ID}{
         white-space: normal !important;
-        overflow-x: hidden !important; /* el scroll horizontal lo damos a wrappers */
         max-width: 100% !important;
       }
 
-      /* 3) Asegurar que cualquier tabla viva dentro de un scroll container */
-      #${DETAIL_ID} table.table{
-        width: max-content !important;    /* mantiene columnas; si no entra, scrollea */
-        min-width: 100% !important;       /* pero nunca más chico que el contenedor */
+      #${DETAIL_ID} .miniCard{
+        max-width: 100% !important;
+      }
+
+      /* Wrapper universal para tablas */
+      #${DETAIL_ID} .cfcTableScroll{
+        overflow: auto !important;
+        max-width: 100% !important;
+        margin-top: 10px;
+      }
+
+      /* Tablas: si no entran, que scrolleen en su wrapper */
+      #${DETAIL_ID} table{
+        width: max-content !important;
+        min-width: 100% !important;
         table-layout: auto !important;
       }
 
-      /* 4) Cualquier wrapper con overflow debe quedar “encerrado” y mostrar barras */
-      #${DETAIL_ID} .miniCard{
-        max-width: 100% !important;
-        overflow: hidden !important; /* evita empujar layout */
-      }
-
-      #${DETAIL_ID} .miniCard > div{
-        max-width: 100% !important;
-      }
-
-      /* Wrapper de tablas (los que vos ponés con overflow:auto inline) */
-      #${DETAIL_ID} .miniCard > div[style*="overflow"]{
-        overflow: auto !important;
-        max-width: 100% !important;
-      }
-
-      /* 5) Nuestro bloque Parte 1/3 */
+      /* Nuestro bloque Parte 1/3 */
       #${WRAP_ID}, #${WRAP_ID} *{
         font-family: var(--font, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial) !important;
         white-space: normal !important;
@@ -251,6 +242,35 @@
       }
     `;
     document.head.appendChild(s);
+  };
+
+  // Asegura que TODA tabla dentro del detalle tenga un wrapper con overflow:auto
+  const ensureTableWrappers = panel => {
+    const tables = [...panel.querySelectorAll("table")];
+    tables.forEach(table => {
+      if (table.closest(".cfcTableScroll")) return;
+
+      const p = table.parentElement;
+      // Si el padre ya es un “div con overflow”, lo convertimos en wrapper
+      if (p && p.tagName === "DIV") {
+        const st = (p.getAttribute("style") || "").toLowerCase();
+        if (st.includes("overflow")) {
+          p.classList.add("cfcTableScroll");
+          p.style.overflow = "auto";
+          p.style.maxWidth = "100%";
+          return;
+        }
+      }
+
+      // Si no, lo envolvemos nosotros
+      const wrap = document.createElement("div");
+      wrap.className = "cfcTableScroll";
+      wrap.style.overflow = "auto";
+      wrap.style.maxWidth = "100%";
+
+      table.parentNode?.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
   };
 
   /* ================= AUTO RULES (OPEN) ================= */
@@ -354,7 +374,7 @@
     return `
       <div id="${WRAP_ID}" class="miniCard" style="margin-top:14px;">
         <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
-        <div style="overflow:auto; margin-top:10px;">
+        <div class="cfcTableScroll">
           <table class="table">
             <thead>
               <tr>
@@ -449,7 +469,6 @@
   const patch = async panel => {
     if (!panel || panel.style.display === "none") return;
 
-    // LOCK: si está corriendo, no reentrar (evita insert doble)
     if (panel.getAttribute(BUSY_ATTR) === "1") return;
     panel.setAttribute(BUSY_ATTR, "1");
 
@@ -457,27 +476,26 @@
       ensureStyle();
       removeV2IfExists(panel);
 
-      // Siempre limpiar wraps duplicados (por si ya pasó el bug)
-      removeAllOurWraps(panel);
-
-      // Ocultaciones / fixes UI
+      // UI fixes primero
       hideCorrectIncorrectBoxes(panel);
       hideParte33LargoColumn(panel);
       fixParte23Order(panel);
       hideOldParte13Everywhere(panel);
 
+      // Scroll wrappers para TODO lo existente
+      ensureTableWrappers(panel);
+
       const row = extractRowRaw(panel);
       if (!row) return;
 
       const key = buildRowKey(row);
-
-      // Marcamos el key ANTES del await para evitar carrera
       panel.setAttribute(PATCH_KEY, key);
 
-      // Render Parte 1/3 nueva
+      // (re)insert nuestra Parte 1/3
+      removeAllOurWraps(panel);
+
       const html = await renderParte13(row);
 
-      // (por si mientras esperábamos se volvió a insertar algo)
       removeAllOurWraps(panel);
       hideOldParte13Everywhere(panel);
 
@@ -486,12 +504,10 @@
       const node = tmp.firstElementChild;
       if (!node) return;
 
-      // Insertar ANTES de la Parte 2/3
       const parte23 = findParte23Card(panel);
       if (parte23 && parte23.parentNode) {
         parte23.parentNode.insertBefore(node, parte23);
       } else {
-        // fallback: antes del JSON
         const divs = [...panel.querySelectorAll("div")];
         const jsonDiv = divs.find(d =>
           (d.textContent || "").trim().startsWith("{") &&
@@ -503,11 +519,12 @@
 
       bindHuman(panel);
 
-      // Re-aplicar por si el DOM cambió
+      // Reaplicar todo post-insert
       hideCorrectIncorrectBoxes(panel);
       hideParte33LargoColumn(panel);
       fixParte23Order(panel);
       hideOldParte13Everywhere(panel);
+      ensureTableWrappers(panel);
 
     } finally {
       panel.setAttribute(BUSY_ATTR, "0");
