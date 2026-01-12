@@ -1,10 +1,16 @@
 // =====================================================
 // PATCH DETALLE V3 (UNICO)
 // - NO toca ui.js
+// - Inserta PARTE 1/3 ARRIBA (debajo del header de pills) y OCULTA la PARTE 1/3 vieja
 // - Inserta PARTE 1/3 con 5 columnas clave:
 //   (3 auto) Señales / Ética / Opinión  -> SOLO si hay respuesta
 //   (2 humano) Observación / Porcentaje -> editables + localStorage
 // - Evalúa con rules/open_signals_v1.json
+//
+// FIXES:
+// (A) Ubicación: ahora aparece arriba (no abajo)
+// (B) Oculta solo la miniCard vieja de "PARTE 1/3" (no elimina nada)
+// (C) Porcentaje humano: SOLO 0 ó 8,33 (cualquier otro valor => 0)
 // =====================================================
 
 (() => {
@@ -15,6 +21,10 @@
   const STYLE_ID = "detalleV3_style";
 
   const LS_KEY = "cfc_parte13_humano_v1";
+
+  // porcentaje permitido (solo 2 valores)
+  const PCT_ALLOWED = "8.33"; // guardamos con punto
+  const PCT_ALLOWED_DISPLAY = "8,33"; // para placeholder UI
 
   // -------------------------
   // Helpers
@@ -69,7 +79,7 @@
   }
 
   // -------------------------
-  // HEADERS oficiales (igual que venís usando)
+  // HEADERS oficiales
   // -------------------------
   const EXPECTED_HEADERS = [
     "Marca temporal",
@@ -122,7 +132,7 @@
   const Q_ABIERTAS_ALTA = ["Q1","Q9","Q13","Q14","Q15","Q18","Q21","Q22","Q23","Q27","Q30","Q31"];
 
   // -------------------------
-  // Extraer rowRaw del DOM (tu JSON ya está en el detailPanel)
+  // Extraer rowRaw del DOM
   // -------------------------
   function extractRowRaw(panel) {
     const divs = [...panel.querySelectorAll("div")];
@@ -136,6 +146,19 @@
       return JSON.parse(candidate);
     } catch (_) {
       return null;
+    }
+  }
+
+  // -------------------------
+  // Ocultar la PARTE 1/3 vieja (miniCard de ui.js)
+  // -------------------------
+  function hideOldParte13(panel) {
+    const cards = [...panel.querySelectorAll(".miniCard")];
+    for (const c of cards) {
+      const title = c.querySelector(".sectionTitle")?.textContent || "";
+      if (norm(title).includes("parte 1/3")) {
+        c.style.display = "none"; // SOLO ocultar
+      }
     }
   }
 
@@ -277,7 +300,6 @@
           const hit = runRegex(r.pattern, ansNorm);
 
           if (r.signals_ok || r.signals_bad) {
-            // regla tipo “si falta, es warning/bad”
             if (hit) {
               (r.signals_ok || []).forEach(s => outSignals.push(String(s)));
             } else {
@@ -287,7 +309,6 @@
               else if (sev === "warn" && severity !== "bad") severity = "warn";
             }
           } else {
-            // regla normal: si matchea, agrega signals
             if (hit) {
               (r.signals || []).forEach(s => outSignals.push(String(s)));
               (r.ethics || []).forEach(e => outEthics.add(String(e)));
@@ -317,7 +338,6 @@
       else if (severity === "warn") opinion = Q.opinions.warn || "Revisar: hay señales parciales.";
       else opinion = Q.opinions.ok || "OK.";
     } else {
-      // fallback
       opinion = (severity === "bad") ? "Riesgo alto (señales negativas detectadas)."
              : (severity === "warn") ? "Revisar (señales mixtas)."
              : "OK (sin señales negativas relevantes).";
@@ -351,24 +371,40 @@
     return `${rowKey}__${qid}`;
   }
 
+  // Normaliza porcentaje: SOLO "0" o "8.33"
+  function normalizePctInput(value) {
+    const s = String(value ?? "").trim();
+    if (!s.length) return "0";
+
+    // permitir coma o punto
+    const s2 = s.replace(",", ".").replace(/\s+/g, "");
+
+    // casos exactos
+    if (s2 === "0" || s2 === "0.0" || s2 === "0.00") return "0";
+    if (s2 === PCT_ALLOWED || s2 === "8.330" || s2 === "8.3300") return PCT_ALLOWED;
+
+    // cualquier otro => 0 (tu regla dura)
+    return "0";
+  }
+
   // -------------------------
   // Render PARTE 1/3 V3
   // -------------------------
   async function renderParte13_V3(rowRaw) {
     const OPEN = await loadOpenSignalsOnce();
 
+    const rowKey = buildRowKey(rowRaw);
+
     const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
       const header = QID_TO_HEADER[qid];
       const qnum = headerNumber(header) + "/33";
       const pregunta = questionTextFromHeader(header);
       const ansRaw = rowRaw?.[header];
-      const ansTxt = String(ansRaw ?? "").trim();
 
       // AUTO (3 cols) SOLO si hay respuesta:
       const auto = buildAutoColumns(OPEN, qid, ansRaw);
 
       // HUMANO (2 cols) siempre editables:
-      const rowKey = buildRowKey(rowRaw);
       const k = getHumanKey(rowKey, qid);
 
       return `
@@ -384,16 +420,26 @@
 
           <!-- HUMANO -->
           <td><textarea placeholder="Tu observación..."></textarea></td>
-          <td><input type="number" min="0" max="100" step="0.01" placeholder="0-100"></td>
+          <td>
+            <input
+              type="number"
+              min="0"
+              max="8.33"
+              step="8.33"
+              placeholder="0 o ${PCT_ALLOWED_DISPLAY}"
+            >
+          </td>
         </tr>
       `;
     }).join("");
 
     return `
-      <div class="miniCard" style="margin-top:14px;">
+      <div class="miniCard" style="margin-top:12px;">
         <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
         <div class="muted" style="margin-top:6px;">
-          Regla: Señales/Ética/Opinión se completan SOLO si hay respuesta. Observación/Porcentaje son 100% tuyos y se guardan en este navegador.
+          Regla: Señales/Ética/Opinión se completan SOLO si hay respuesta.
+          Observación/Porcentaje son 100% tuyos y se guardan en este navegador.
+          Porcentaje permitido: <b>0</b> o <b>${PCT_ALLOWED_DISPLAY}%</b>.
         </div>
 
         <div style="overflow:auto; margin-top:10px;">
@@ -420,13 +466,18 @@
   }
 
   // -------------------------
-  // Patch principal (solo inserta Parte 1/3 V3)
+  // Patch principal
+  // - Oculta Parte 1/3 vieja
+  // - Inserta V3 ARRIBA (debajo del header row de pills/botón cerrar)
   // -------------------------
   async function patch(panel) {
     if (!panel) return;
     if (panel.style.display === "none") return;
 
     ensureInnerStyle();
+
+    // OCULTAR la Parte 1/3 vieja (solo display none)
+    hideOldParte13(panel);
 
     const rowRaw = extractRowRaw(panel);
     if (!rowRaw) return;
@@ -438,25 +489,29 @@
 
     if (existingWrap) existingWrap.remove();
 
-    // Insertar antes del JSON final
-    const allDivs = [...panel.querySelectorAll("div")];
-    const jsonDiv = allDivs.find(d => (d.textContent || "").trim().startsWith("{") && (d.textContent || "").includes('"Marca temporal"'));
-    if (!jsonDiv) return;
-
     const wrap = document.createElement("div");
     wrap.id = WRAP_ID;
-
-    // SOLO PARTE 1/3 (tu objetivo)
     wrap.innerHTML = await renderParte13_V3(rowRaw);
 
-    jsonDiv.parentNode.insertBefore(wrap, jsonDiv);
+    // INSERTAR ARRIBA:
+    // ui.js arma primero un <div class="row" ...> (pills + cerrar)
+    // Lo dejamos, y ponemos V3 inmediatamente DESPUÉS.
+    const topRow = panel.querySelector("div.row");
+    if (topRow && topRow.parentNode === panel) {
+      const ref = topRow.nextSibling; // puede ser textnode
+      panel.insertBefore(wrap, ref);
+    } else {
+      // fallback: al inicio absoluto
+      panel.insertBefore(wrap, panel.firstChild);
+    }
+
     panel.setAttribute(PATCH_KEY_ATTR, rowKey);
 
     // Bind humano (load + autosave)
-    bindHumanEditors(panel, rowKey);
+    bindHumanEditors(panel);
   }
 
-  function bindHumanEditors(panel, rowKey) {
+  function bindHumanEditors(panel) {
     const db = loadHumanDB();
     const wrap = panel.querySelector(`#${WRAP_ID}`);
     if (!wrap) return;
@@ -468,21 +523,39 @@
       const ta = tr.querySelector("textarea");
       const inp = tr.querySelector('input[type="number"]');
 
-      const saved = db[hkey] || { obs: "", pct: "" };
+      const saved = db[hkey] || { obs: "", pct: "0" };
+
       if (ta) ta.value = saved.obs || "";
-      if (inp) inp.value = saved.pct || "";
+      if (inp) inp.value = normalizePctInput(saved.pct ?? "0");
 
       const saveNow = () => {
         const next = loadHumanDB();
+        const pct = inp ? normalizePctInput(inp.value) : "0";
+
+        // FORZAMOS EN UI el valor normalizado
+        if (inp) inp.value = pct;
+
         next[hkey] = {
           obs: ta ? String(ta.value || "") : "",
-          pct: inp ? String(inp.value || "") : ""
+          pct
         };
         saveHumanDB(next);
       };
 
       if (ta) ta.addEventListener("input", saveNow);
-      if (inp) inp.addEventListener("input", saveNow);
+
+      if (inp) {
+        // input en vivo + blur/enter
+        inp.addEventListener("input", saveNow);
+        inp.addEventListener("blur", saveNow);
+        inp.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            saveNow();
+            inp.blur();
+          }
+        });
+      }
     }
   }
 
