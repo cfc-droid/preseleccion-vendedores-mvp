@@ -12,6 +12,154 @@ window.UI = (() => {
   let currentTab = "RESULTADOS"; // RESULTADOS | SELECCIONADOS | HISTORIAL
   const LS_KEY = "cfc_preseleccion_history_v1";
 
+  // =========================
+  // PARTE 1/3 HUMANO (UI NATIVO)
+  // =========================
+  const LS_P13 = "cfc_parte13_humano_v1";
+  const P13_STEP = 8.33; // 100/12
+  const P13_ALLOWED = new Set(["0", "8.33"]);
+
+  let _OPEN_CACHE = null;
+  async function loadOpenOnce() {
+    if (_OPEN_CACHE) return _OPEN_CACHE;
+    try {
+      const r = await fetch("rules/open_signals_v1.json");
+      _OPEN_CACHE = r.ok ? await r.json() : null;
+    } catch {
+      _OPEN_CACHE = null;
+    }
+    return _OPEN_CACHE;
+  }
+
+  function loadP13DB() {
+    try { return JSON.parse(localStorage.getItem(LS_P13) || "{}"); }
+    catch { return {}; }
+  }
+  function saveP13DB(db) {
+    localStorage.setItem(LS_P13, JSON.stringify(db));
+  }
+  function normPct(v) {
+    const s = String(v ?? "").trim().replace(",", ".");
+    return P13_ALLOWED.has(s) ? s : "0";
+  }
+
+  function normalizeTextLocal(t) {
+    return String(t ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  function evalAutoOpen(OPEN, qid, answer) {
+    const txt = String(answer ?? "").trim();
+    if (!txt) return { s:"", e:"", o:"" };
+
+    let sev = "ok";
+    const sig = [];
+    const eth = new Set();
+    const n = normalizeTextLocal(txt);
+
+    (OPEN?.defaults?.risk_rules || []).forEach(r => {
+      if (r.pattern && new RegExp(r.pattern, "i").test(n)) {
+        (r.signals || []).forEach(x => sig.push(x));
+        (r.ethics || []).forEach(x => eth.add(x));
+        if (r.severity === "bad") sev = "bad";
+        if (r.severity === "warn" && sev !== "bad") sev = "warn";
+      }
+    });
+
+    (OPEN?.questions?.[qid]?.rules || []).forEach(r => {
+      if (r.pattern && new RegExp(r.pattern, "i").test(n)) {
+        (r.signals || []).forEach(x => sig.push(x));
+        (r.ethics || []).forEach(x => eth.add(x));
+        if (r.severity === "bad") sev = "bad";
+        if (r.severity === "warn" && sev !== "bad") sev = "warn";
+      }
+    });
+
+    const op =
+      sev === "bad" ? "Riesgo alto." :
+      sev === "warn" ? "Revisar." :
+      "OK.";
+
+    return {
+      s: sig.length ? sig.join(" | ") : "Sin señales relevantes",
+      e: eth.size ? [...eth].join(" | ") : "—",
+      o: op
+    };
+  }
+
+  function buildRowKeyFromItem(item) {
+    const rr = item?.rowRaw || {};
+    return `${rr["Marca temporal"] ?? ""}__${rr["Dirección de correo electrónico"] ?? ""}`;
+  }
+
+  async function renderParte13Pro(item, qidsAlta) {
+    const rr = item.rowRaw || {};
+    const OPEN = await loadOpenOnce();
+    const db = loadP13DB();
+    const key = buildRowKeyFromItem(item);
+
+    const rows = qidsAlta.map((qid, idx) => {
+      const header = QID_TO_HEADER[qid] || "";
+      const qtext = header ? questionTextFromHeader(header) : qid;
+      const ansRaw = header ? rr[header] : "";
+      const ansTxt = String(ansRaw ?? "").trim();
+
+      const auto = evalAutoOpen(OPEN, qid, ansRaw);
+
+      const hk = `${key}__${qid}`;
+      const sv = db[hk] || { obs: "", pct: "0" };
+
+      return `
+        <tr data-p13k="${escapeHtml(hk)}">
+          <td>${idx + 1}</td>
+          <td><span class="kbd">${escapeHtml(qid)}</span></td>
+          <td>${escapeHtml(qtext)}</td>
+          <td>${escapeHtml(safeVal(ansRaw))}</td>
+          <td>${escapeHtml(auto.s || "—")}</td>
+          <td>${escapeHtml(auto.e || "—")}</td>
+          <td><b>${escapeHtml(auto.o || "—")}</b></td>
+          <td>
+            <textarea ${ansTxt ? "" : "disabled"}>${escapeHtml(sv.obs || "")}</textarea>
+          </td>
+          <td>
+            <input ${ansTxt ? "" : "disabled"} type="number" step="${P13_STEP}" value="${escapeHtml(normPct(sv.pct))}">
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    return `
+      <div class="miniCard">
+        <div class="sectionTitle">PARTE 1/3 — ABIERTAS (PRIORIDAD ALTA) — HUMANO</div>
+        <div class="cfcTableScroll">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:60px;">N°</th>
+                <th style="width:70px;">Q</th>
+                <th style="min-width:240px;">Pregunta</th>
+                <th style="min-width:320px;">Respuesta</th>
+                <th style="min-width:240px;">Señales</th>
+                <th style="min-width:240px;">Reglas éticas</th>
+                <th style="width:140px;">Opinión</th>
+                <th style="min-width:220px;">Observación humana</th>
+                <th style="width:110px;">%</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+
+        <div class="hint" style="margin-top:10px;">
+          % permitido: <b>0</b> o <b>8.33</b> (12 preguntas). Si la respuesta está vacía, los campos se bloquean.
+        </div>
+      </div>
+    `;
+  }
+
   // ======================================================
   // PASO 2.4 — Mapeo QID -> Header oficial (desde EXPECTED_HEADERS)
   // (copiado de app.js para que UI pueda separar secciones en Detalle)
@@ -741,7 +889,7 @@ window.UI = (() => {
       <div style="margin-top:12px;" class="muted">PASO 2.4 — Detalle por secciones:</div>
 
       <div style="display:grid; gap:12px; margin-top:10px;">
-        ${renderQTable("PARTE 1/3 — Preguntas ABIERTAS (PRIORIDAD ALTA)", sections.alta)}
+        ${await renderParte13Pro(item, (getQLists().Q_ALTA))}
         ${renderClosedFixedTables("PARTE 2/3 — RESUMEN (CERRADAS) — FIJO (13 preguntas)", fixedClosedRows, fixedClosedSummary)}
         ${renderQTable("PARTE 3/3 — Preguntas ABIERTAS (INFORMATIVAS)", sections.info)}
       </div>
@@ -749,6 +897,29 @@ window.UI = (() => {
       <div style="margin-top:12px;" class="muted">Contenido completo de la fila (normalizado por headers):</div>
       <div>${escapeHtml(rawPretty)}</div>
     `;
+
+    // Bind Parte 1/3 humano
+    try {
+      const db = loadP13DB();
+      panel.querySelectorAll("tr[data-p13k]").forEach(tr => {
+        const k = tr.getAttribute("data-p13k");
+        const ta = tr.querySelector("textarea");
+        const ip = tr.querySelector("input");
+        if (!ta || !ip) return;
+
+        const save = () => {
+          db[k] = { obs: ta.value, pct: normPct(ip.value) };
+          ip.value = db[k].pct;
+          saveP13DB(db);
+        };
+
+        ta.addEventListener("input", save);
+        ip.addEventListener("input", save);
+        ip.addEventListener("blur", save);
+      });
+    } catch (e) {
+      console.error("bind P13 error", e);
+    }
 
     document.getElementById("closeDetail").addEventListener("click", hideDetail);
   }
