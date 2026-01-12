@@ -1,90 +1,64 @@
 // =====================================================
-// PATCH DETALLE V3 (UNICO) — CORREGIDO
-// - NO toca ui.js
-// - Inserta PARTE 1/3 ARRIBA (debajo del header de pills) y OCULTA la PARTE 1/3 vieja
-// - Inserta PARTE 1/3 con 5 columnas clave:
-//   (3 auto) Señales / Ética / Opinión  -> SOLO si hay respuesta
-//   (2 humano) Observación / Porcentaje -> editables + localStorage
-// - Evalúa con rules/open_signals_v1.json
-//
-// FIXES IMPORTANTES (esta versión):
-// (1) NO oculta el bloque nuevo (antes hideOldParte13 ocultaba TODO lo que diga "PARTE 1/3").
-// (2) Inserta arriba usando :scope > div.row (solo el header real del panel).
-// (3) Anti-loop: evita repatch mientras inserta (MutationObserver).
-// (4) extractRowRaw más robusto (div/pre/code).
+// PATCH DETALLE V3 — FINAL ESTABLE
+// =====================================================
+// - NO toca ui.js ni app.js
+// - Oculta SOLO la Parte 1/3 original (display:none)
+// - Inserta Parte 1/3 nueva ARRIBA
+// - 3 columnas automáticas (solo si hay respuesta)
+// - 2 columnas humanas editables (obs + porcentaje)
+// - Porcentaje permitido: 0 o 8,33
+// - Guardado localStorage por fila + pregunta
 // =====================================================
 
 (() => {
   const DETAIL_ID = "detailPanel";
-
-  const PATCH_KEY_ATTR = "data-patched-v3-key";
   const WRAP_ID = "detalleV3_wrap";
   const STYLE_ID = "detalleV3_style";
-
+  const PATCH_KEY = "data-patch-v3-key";
   const LS_KEY = "cfc_parte13_humano_v1";
+  const PCT_ALLOWED = "8.33";
 
-  // porcentaje permitido (solo 2 valores)
-  const PCT_ALLOWED = "8.33"; // guardamos con punto
-  const PCT_ALLOWED_DISPLAY = "8,33"; // para placeholder UI
+  /* ================= HELPERS ================= */
 
-  // Flag anti-loop para MutationObserver
-  let _IS_PATCHING = false;
-
-  // -------------------------
-  // Helpers
-  // -------------------------
-  function esc(str) {
-    return String(str ?? "")
+  const esc = s =>
+    String(s ?? "")
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
-  }
 
-  function safeVal(v) {
+  const safe = v => {
     const s = String(v ?? "").trim();
     return s.length ? s : "—";
-  }
+  };
 
-  function norm(s) {
-    return String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-  }
+  const norm = s =>
+    String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
-  function canonHeader(h) {
-    return String(h ?? "")
-      .split("\n")[0]
-      .replace(/\s+/g, " ")
-      .trim();
-  }
+  const canonHeader = h =>
+    String(h ?? "").split("\n")[0].replace(/\s+/g, " ").trim();
 
-  function headerNumber(h) {
+  const headerNumber = h => {
     const m = canonHeader(h).match(/^(\d+)\/33\./);
     return m ? m[1] : null;
-  }
+  };
 
-  function questionTextFromHeader(h) {
-    const s = canonHeader(h);
-    return s.replace(/^\d+\/33\.\s*/, "");
-  }
+  const questionText = h =>
+    canonHeader(h).replace(/^\d+\/33\.\s*/, "");
 
-  function normalizeText(text) {
-    return String(text || "")
+  const normalizeText = t =>
+    String(t ?? "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
-  }
 
-  function buildRowKey(rowRaw) {
-    const mt = safeVal(rowRaw?.["Marca temporal"]);
-    const em = safeVal(rowRaw?.["Dirección de correo electrónico"]);
-    return `${mt}__${em}`;
-  }
+  const buildRowKey = row =>
+    `${row?.["Marca temporal"] ?? ""}__${row?.["Dirección de correo electrónico"] ?? ""}`;
 
-  // -------------------------
-  // HEADERS oficiales
-  // -------------------------
+  /* ================= HEADERS ================= */
+
   const EXPECTED_HEADERS = [
     "Marca temporal",
     "Dirección de correo electrónico",
@@ -123,486 +97,207 @@
     "33/33. Si en 30 días no generás ventas, ¿cómo lo interpretás?"
   ];
 
-  const QID_TO_HEADER = (() => {
-    const m = {};
-    for (const h of EXPECTED_HEADERS) {
-      const num = headerNumber(h);
-      if (num) m[`Q${num}`] = h;
-    }
-    return m;
-  })();
+  const QID_TO_HEADER = {};
+  EXPECTED_HEADERS.forEach(h => {
+    const n = headerNumber(h);
+    if (n) QID_TO_HEADER[`Q${n}`] = h;
+  });
 
-  // PARTE 1/3 oficial (12)
-  const Q_ABIERTAS_ALTA = ["Q1","Q9","Q13","Q14","Q15","Q18","Q21","Q22","Q23","Q27","Q30","Q31"];
+  const Q_ABIERTAS = [
+    "Q1","Q9","Q13","Q14","Q15","Q18",
+    "Q21","Q22","Q23","Q27","Q30","Q31"
+  ];
 
-  // -------------------------
-  // Extraer rowRaw del DOM (robusto)
-  // -------------------------
-  function extractRowRaw(panel) {
-    // 1) Buscar en div/pre/code (cubre ui.js cambiando wrappers)
-    const nodes = [
-      ...panel.querySelectorAll("div"),
-      ...panel.querySelectorAll("pre"),
-      ...panel.querySelectorAll("code"),
-    ];
+  /* ================= DOM ================= */
 
-    const candidate = nodes
-      .map(n => n.textContent || "")
-      .find(t => {
-        const s = t.trim();
-        return s.startsWith("{") && s.includes('"Marca temporal"') && s.includes('"Dirección de correo electrónico"');
-      });
+  const extractRowRaw = panel => {
+    const divs = [...panel.querySelectorAll("div")];
+    const json = divs.find(d =>
+      (d.textContent || "").trim().startsWith("{") &&
+      d.textContent.includes('"Marca temporal"')
+    );
+    try { return json ? JSON.parse(json.textContent) : null; }
+    catch { return null; }
+  };
 
-    if (!candidate) return null;
+  const hideOldParte13 = panel => {
+    panel.querySelectorAll(".miniCard").forEach(c => {
+      const t = norm(c.querySelector(".sectionTitle")?.textContent);
+      if (t.includes("parte 1/3")) c.style.display = "none";
+    });
+  };
 
-    try {
-      return JSON.parse(candidate);
-    } catch (_) {
-      return null;
-    }
-  }
+  /* ================= STYLES ================= */
 
-  // -------------------------
-  // Ocultar la PARTE 1/3 vieja (miniCard de ui.js)
-  // IMPORTANTE: NO ocultar nada dentro de nuestro WRAP
-  // -------------------------
-  function hideOldParte13(panel) {
-    const cards = [...panel.querySelectorAll(".miniCard")];
-
-    for (const c of cards) {
-      // Si está dentro del wrap nuevo, NO TOCAR
-      if (c.closest(`#${WRAP_ID}`)) continue;
-
-      const title = c.querySelector(".sectionTitle")?.textContent || "";
-      if (norm(title).includes("parte 1/3")) {
-        c.style.display = "none"; // SOLO ocultar
-      }
-    }
-  }
-
-  // -------------------------
-  // Estilos internos (solo V3)
-  // -------------------------
-  function ensureInnerStyle() {
+  const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return;
-
-    const st = document.createElement("style");
-    st.id = STYLE_ID;
-    st.textContent = `
-      #${WRAP_ID}, #${WRAP_ID} *{
-        font-family: var(--font, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial) !important;
-        white-space: normal !important;
-      }
-      #${WRAP_ID} .table{ table-layout: fixed; width:100%; }
-      #${WRAP_ID} th, #${WRAP_ID} td{
-        overflow-wrap: anywhere;
-        word-break: break-word;
-        vertical-align: top;
-      }
-      #${WRAP_ID} textarea{
-        width: 100%;
-        min-height: 70px;
-        resize: vertical;
-        padding: 8px;
-        border-radius: 10px;
-        border: 1px solid var(--border, #2a2a3a);
-        background: rgba(255,255,255,0.03);
-        color: var(--text, #f2f2f2);
-        font-family: var(--font, ui-sans-serif);
-        font-size: 13px;
-      }
-      #${WRAP_ID} input[type="number"]{
-        width: 100%;
-        padding: 8px;
-        border-radius: 10px;
-        border: 1px solid var(--border, #2a2a3a);
-        background: rgba(255,255,255,0.03);
-        color: var(--text, #f2f2f2);
-        font-size: 13px;
-      }
-      #${WRAP_ID} .muted { color: var(--muted, #b9b9c6); }
-      #${WRAP_ID} .kbd{
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        font-size: 12px;
-        padding: 2px 6px;
-        border:1px solid var(--border, #2a2a3a);
-        border-radius: 8px;
-        background: rgba(255,255,255,0.03);
-        color: var(--text, #f2f2f2);
+    const s = document.createElement("style");
+    s.id = STYLE_ID;
+    s.textContent = `
+      #${WRAP_ID} textarea,
+      #${WRAP_ID} input{
+        width:100%;padding:8px;border-radius:10px;
+        background:rgba(255,255,255,.03);
+        border:1px solid var(--border);color:var(--text);
       }
     `;
-    document.head.appendChild(st);
-  }
+    document.head.appendChild(s);
+  };
 
-  // -------------------------
-  // Cargar open_signals una vez
-  // -------------------------
-  let _OPEN_CACHE = null;
+  /* ================= AUTO EVAL ================= */
 
-  async function loadOpenSignalsOnce() {
-    if (_OPEN_CACHE) return _OPEN_CACHE;
+  let OPEN_CACHE = null;
+  const loadOpen = async () => {
+    if (OPEN_CACHE) return OPEN_CACHE;
     try {
-      const res = await fetch("rules/open_signals_v1.json");
-      if (!res.ok) throw new Error(`No se pudo cargar open_signals_v1.json (HTTP ${res.status})`);
-      _OPEN_CACHE = await res.json();
-      return _OPEN_CACHE;
-    } catch (e) {
-      console.error(e);
-      _OPEN_CACHE = null;
-      return null;
-    }
-  }
+      const r = await fetch("rules/open_signals_v1.json");
+      OPEN_CACHE = r.ok ? await r.json() : null;
+    } catch { OPEN_CACHE = null; }
+    return OPEN_CACHE;
+  };
 
-  // -------------------------
-  // Evaluación Parte 1/3 (auto 3 columnas)
-  // REGLA DURA: si respuesta vacía -> 3 columnas VACÍAS reales
-  // -------------------------
-  function runRegex(pattern, text) {
-    try {
-      const re = new RegExp(pattern, "i");
-      return re.test(text);
-    } catch (_) {
-      return false;
-    }
-  }
+  const evalAuto = (OPEN, qid, answer) => {
+    const txt = String(answer ?? "").trim();
+    if (!txt) return { s:"", e:"", o:"" };
 
-  function evalMinLines(rule, answer) {
-    const minLines = Number(rule.min_lines || 0);
-    const minCharsPerLine = Number(rule.min_chars_per_line || 1);
-    const lines = String(answer || "")
-      .split("\n")
-      .map(x => x.trim())
-      .filter(x => x.length >= minCharsPerLine);
-    return lines.length >= minLines;
-  }
+    let sev = "ok";
+    const sig = [];
+    const eth = new Set();
+    const n = normalizeText(txt);
 
-  function buildAutoColumns(OPEN, qid, answerRaw) {
-    const ans = String(answerRaw ?? "").trim();
-    if (!ans.length) {
-      // VACÍO REAL
-      return { signals: "", ethics: "", opinion: "" };
-    }
-
-    if (!OPEN) {
-      return {
-        signals: "—",
-        ethics: "—",
-        opinion: "No se pudieron cargar reglas open_signals_v1.json"
-      };
-    }
-
-    const outSignals = [];
-    const outEthics = new Set();
-    let severity = "ok"; // ok | warn | bad
-
-    const ansNorm = normalizeText(ans);
-
-    // 1) Risk rules globales
-    const riskRules = OPEN?.defaults?.risk_rules || [];
-    for (const rr of riskRules) {
-      if (rr?.type === "regex" && rr?.pattern && runRegex(rr.pattern, ansNorm)) {
-        (rr.signals || rr.signals_ok || rr.signals_bad || []).forEach(s => outSignals.push(String(s)));
-        (rr.ethics || []).forEach(e => outEthics.add(String(e)));
-        if (rr.severity === "bad") severity = "bad";
-        else if (rr.severity === "warn" && severity !== "bad") severity = "warn";
+    (OPEN?.defaults?.risk_rules || []).forEach(r => {
+      if (r.pattern && new RegExp(r.pattern,"i").test(n)) {
+        (r.signals||[]).forEach(x=>sig.push(x));
+        (r.ethics||[]).forEach(x=>eth.add(x));
+        if (r.severity==="bad") sev="bad";
+        if (r.severity==="warn" && sev!=="bad") sev="warn";
       }
-    }
+    });
 
-    // 2) Rules por pregunta (Q1, Q9...)
-    const Q = OPEN?.questions?.[qid] || null;
-    if (Q && Array.isArray(Q.rules)) {
-      for (const r of Q.rules) {
-        if (!r || !r.type) continue;
-
-        if (r.type === "regex") {
-          const hit = runRegex(r.pattern, ansNorm);
-
-          if (r.signals_ok || r.signals_bad) {
-            if (hit) {
-              (r.signals_ok || []).forEach(s => outSignals.push(String(s)));
-            } else {
-              (r.signals_bad || []).forEach(s => outSignals.push(String(s)));
-              const sev = r.severity_if_missing || "warn";
-              if (sev === "bad") severity = "bad";
-              else if (sev === "warn" && severity !== "bad") severity = "warn";
-            }
-          } else {
-            if (hit) {
-              (r.signals || []).forEach(s => outSignals.push(String(s)));
-              (r.ethics || []).forEach(e => outEthics.add(String(e)));
-              if (r.severity === "bad") severity = "bad";
-              else if (r.severity === "warn" && severity !== "bad") severity = "warn";
-            }
-          }
-        }
-
-        if (r.type === "min_lines") {
-          const ok = evalMinLines(r, ans);
-          if (ok) (r.signals_ok || []).forEach(s => outSignals.push(String(s)));
-          else {
-            (r.signals_bad || []).forEach(s => outSignals.push(String(s)));
-            const sev = r.severity_if_missing || "warn";
-            if (sev === "bad") severity = "bad";
-            else if (sev === "warn" && severity !== "bad") severity = "warn";
-          }
-        }
+    (OPEN?.questions?.[qid]?.rules || []).forEach(r => {
+      if (r.pattern && new RegExp(r.pattern,"i").test(n)) {
+        (r.signals||[]).forEach(x=>sig.push(x));
+        (r.ethics||[]).forEach(x=>eth.add(x));
+        if (r.severity==="bad") sev="bad";
+        if (r.severity==="warn" && sev!=="bad") sev="warn";
       }
-    }
+    });
 
-    // 3) Opinion
-    let opinion = "—";
-    if (Q && Q.opinions) {
-      if (severity === "bad") opinion = Q.opinions.bad || "Riesgo alto: revisar.";
-      else if (severity === "warn") opinion = Q.opinions.warn || "Revisar: hay señales parciales.";
-      else opinion = Q.opinions.ok || "OK.";
-    } else {
-      opinion = (severity === "bad") ? "Riesgo alto (señales negativas detectadas)."
-             : (severity === "warn") ? "Revisar (señales mixtas)."
-             : "OK (sin señales negativas relevantes).";
-    }
+    const op =
+      sev==="bad" ? "Riesgo alto." :
+      sev==="warn" ? "Revisar." :
+      "OK.";
 
-    // 4) Señales y ética
-    const signalsTxt = outSignals.length ? outSignals.join(" | ") : "Sin señales relevantes";
-    const ethicsTxt = outEthics.size ? [...outEthics].join(" | ") : "—";
+    return {
+      s: sig.length ? sig.join(" | ") : "Sin señales relevantes",
+      e: eth.size ? [...eth].join(" | ") : "—",
+      o: op
+    };
+  };
 
-    return { signals: signalsTxt, ethics: ethicsTxt, opinion };
-  }
+  /* ================= HUMANO ================= */
 
-  // -------------------------
-  // LocalStorage (humano)
-  // -------------------------
-  function loadHumanDB() {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      const db = raw ? JSON.parse(raw) : {};
-      return (db && typeof db === "object") ? db : {};
-    } catch (_) {
-      return {};
-    }
-  }
+  const loadDB = () => {
+    try { return JSON.parse(localStorage.getItem(LS_KEY)||"{}"); }
+    catch { return {}; }
+  };
+  const saveDB = db => localStorage.setItem(LS_KEY, JSON.stringify(db));
 
-  function saveHumanDB(db) {
-    localStorage.setItem(LS_KEY, JSON.stringify(db));
-  }
+  const normPct = v => {
+    const s = String(v??"").replace(",",".");
+    return s === PCT_ALLOWED ? PCT_ALLOWED : "0";
+  };
 
-  function getHumanKey(rowKey, qid) {
-    return `${rowKey}__${qid}`;
-  }
+  /* ================= RENDER ================= */
 
-  // Normaliza porcentaje: SOLO "0" o "8.33"
-  function normalizePctInput(value) {
-    const s = String(value ?? "").trim();
-    if (!s.length) return "0";
+  const render = async row => {
+    const OPEN = await loadOpen();
+    const key = buildRowKey(row);
+    const db = loadDB();
 
-    // permitir coma o punto
-    const s2 = s.replace(",", ".").replace(/\s+/g, "");
-
-    // casos exactos
-    if (s2 === "0" || s2 === "0.0" || s2 === "0.00") return "0";
-    if (s2 === PCT_ALLOWED || s2 === "8.330" || s2 === "8.3300") return PCT_ALLOWED;
-
-    // cualquier otro => 0 (tu regla dura)
-    return "0";
-  }
-
-  // -------------------------
-  // Render PARTE 1/3 V3
-  // -------------------------
-  async function renderParte13_V3(rowRaw) {
-    const OPEN = await loadOpenSignalsOnce();
-
-    const rowKey = buildRowKey(rowRaw);
-
-    const rows = Q_ABIERTAS_ALTA.map((qid, idx) => {
-      const header = QID_TO_HEADER[qid];
-      const qnum = headerNumber(header) + "/33";
-      const pregunta = questionTextFromHeader(header);
-      const ansRaw = rowRaw?.[header];
-
-      // AUTO (3 cols) SOLO si hay respuesta:
-      const auto = buildAutoColumns(OPEN, qid, ansRaw);
-
-      // HUMANO (2 cols) siempre editables:
-      const k = getHumanKey(rowKey, qid);
+    const rows = Q_ABIERTAS.map((qid,i)=>{
+      const h = QID_TO_HEADER[qid];
+      const a = row[h];
+      const auto = evalAuto(OPEN,qid,a);
+      const hk = `${key}__${qid}`;
+      const sv = db[hk]||{obs:"",pct:"0"};
 
       return `
-        <tr data-qid="${esc(qid)}" data-hkey="${esc(k)}">
-          <td>${idx + 1}</td>
-          <td><span class="kbd">${esc(qnum)}</span> ${esc(pregunta)}</td>
-          <td>${esc(safeVal(ansRaw))}</td>
-
-          <!-- AUTO -->
-          <td>${auto.signals ? esc(auto.signals) : ""}</td>
-          <td>${auto.ethics ? esc(auto.ethics) : ""}</td>
-          <td>${auto.opinion ? esc(auto.opinion) : ""}</td>
-
-          <!-- HUMANO -->
-          <td><textarea placeholder="Tu observación..."></textarea></td>
-          <td>
-            <input
-              type="number"
-              min="0"
-              max="8.33"
-              step="8.33"
-              placeholder="0 o ${PCT_ALLOWED_DISPLAY}"
-            >
-          </td>
-        </tr>
-      `;
+        <tr data-k="${hk}">
+          <td>${i+1}</td>
+          <td><b>${headerNumber(h)}/33</b> ${esc(questionText(h))}</td>
+          <td>${esc(safe(a))}</td>
+          <td>${esc(auto.s)}</td>
+          <td>${esc(auto.e)}</td>
+          <td>${esc(auto.o)}</td>
+          <td><textarea>${esc(sv.obs)}</textarea></td>
+          <td><input type="number" step="8.33" value="${sv.pct}"></td>
+        </tr>`;
     }).join("");
 
     return `
-      <div class="miniCard" style="margin-top:12px;">
-        <div class="sectionTitle">PARTE 1/3 — PREGUNTAS Y RESPUESTAS (ABIERTAS • PRIORIDAD ALTA)</div>
-        <div class="muted" style="margin-top:6px;">
-          Regla: Señales/Ética/Opinión se completan SOLO si hay respuesta.
-          Observación/Porcentaje son 100% tuyos y se guardan en este navegador.
-          Porcentaje permitido: <b>0</b> o <b>${PCT_ALLOWED_DISPLAY}%</b>.
-        </div>
+      <div id="${WRAP_ID}" class="miniCard">
+        <div class="sectionTitle">PARTE 1/3 — ABIERTAS (PRIORIDAD ALTA)</div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>#</th><th>Pregunta</th><th>Respuesta</th>
+              <th>Señales</th><th>Ética</th><th>Opinión IA</th>
+              <th>Observación</th><th>%</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  };
 
-        <div style="overflow:auto; margin-top:10px;">
-          <table class="table">
-            <thead>
-              <tr>
-                <th style="width:60px;">N°</th>
-                <th style="width:320px;">12 PREGUNTAS “ABIERTAS” — PRIORIDAD ALTA</th>
-                <th style="width:360px;">RESPUESTA DEL VENDEDOR</th>
-
-                <th style="width:260px;">SEÑALES DETECTADAS (VÁLIDA RTA)</th>
-                <th style="width:320px;">REGLAS ÉTICAS AFECTADAS (si aplica)</th>
-                <th style="width:220px;">OPINIÓN IA (NO decide)</th>
-
-                <th style="width:260px;">OBSERVACIÓN HUMANA</th>
-                <th style="width:140px;">PORCENTAJE</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  }
-
-  // -------------------------
-  // Patch principal
-  // - Oculta Parte 1/3 vieja
-  // - Inserta V3 ARRIBA (debajo del header row de pills/botón cerrar)
-  // -------------------------
-  async function patch(panel) {
-    if (!panel) return;
-    if (panel.style.display === "none") return;
-    if (_IS_PATCHING) return;
-
-    _IS_PATCHING = true;
-    try {
-      ensureInnerStyle();
-
-      // OCULTAR la Parte 1/3 vieja (solo display none) SIN tocar la nueva
-      hideOldParte13(panel);
-
-      const rowRaw = extractRowRaw(panel);
-      if (!rowRaw) return;
-
-      const rowKey = buildRowKey(rowRaw);
-      const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
-      const existingWrap = panel.querySelector(`#${WRAP_ID}`);
-      if (prevKey === rowKey && existingWrap) {
-        // igual fila, ya está
-        return;
-      }
-
-      if (existingWrap) existingWrap.remove();
-
-      const wrap = document.createElement("div");
-      wrap.id = WRAP_ID;
-      wrap.innerHTML = await renderParte13_V3(rowRaw);
-
-      // INSERTAR ARRIBA:
-      // ui.js arma primero un <div class="row" ...> (pills + cerrar)
-      // Queremos SOLO el row directo hijo del panel (no rows internos).
-      const topRow = panel.querySelector(":scope > div.row");
-      if (topRow) {
-        const ref = topRow.nextSibling; // puede ser textnode
-        panel.insertBefore(wrap, ref);
-      } else {
-        // fallback: al inicio absoluto
-        panel.insertBefore(wrap, panel.firstChild);
-      }
-
-      panel.setAttribute(PATCH_KEY_ATTR, rowKey);
-
-      // Bind humano (load + autosave)
-      bindHumanEditors(panel);
-
-      // Re-ocultar por si ui.js reinsertó algo luego
-      hideOldParte13(panel);
-    } finally {
-      _IS_PATCHING = false;
-    }
-  }
-
-  function bindHumanEditors(panel) {
-    const wrap = panel.querySelector(`#${WRAP_ID}`);
-    if (!wrap) return;
-
-    const rows = [...wrap.querySelectorAll('tr[data-hkey]')];
-    if (!rows.length) return;
-
-    // cargar una vez (pero guardamos recargando para evitar pisadas)
-    const db0 = loadHumanDB();
-
-    for (const tr of rows) {
-      const hkey = tr.getAttribute("data-hkey");
+  const bindHuman = panel => {
+    const db = loadDB();
+    panel.querySelectorAll(`#${WRAP_ID} tr[data-k]`).forEach(tr=>{
+      const k = tr.dataset.k;
       const ta = tr.querySelector("textarea");
-      const inp = tr.querySelector('input[type="number"]');
-
-      const saved = db0[hkey] || { obs: "", pct: "0" };
-
-      if (ta) ta.value = saved.obs || "";
-      if (inp) inp.value = normalizePctInput(saved.pct ?? "0");
-
-      const saveNow = () => {
-        const next = loadHumanDB();
-        const pct = inp ? normalizePctInput(inp.value) : "0";
-
-        // FORZAMOS EN UI el valor normalizado
-        if (inp) inp.value = pct;
-
-        next[hkey] = {
-          obs: ta ? String(ta.value || "") : "",
-          pct
-        };
-        saveHumanDB(next);
+      const ip = tr.querySelector("input");
+      const save = ()=>{
+        db[k]={obs:ta.value,pct:normPct(ip.value)};
+        ip.value=db[k].pct;
+        saveDB(db);
       };
+      ta.oninput = save;
+      ip.oninput = save;
+      ip.onblur = save;
+    });
+  };
 
-      if (ta) ta.addEventListener("input", saveNow);
+  /* ================= PATCH ================= */
 
-      if (inp) {
-        inp.addEventListener("input", saveNow);
-        inp.addEventListener("blur", saveNow);
-        inp.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            saveNow();
-            inp.blur();
-          }
-        });
-      }
-    }
-  }
+  const patch = async panel => {
+    if (!panel || panel.style.display==="none") return;
+    ensureStyle();
+    hideOldParte13(panel);
 
-  // -------------------------
-  // Observer
-  // -------------------------
-  function init() {
-    const panel = document.getElementById(DETAIL_ID);
-    if (!panel) return;
+    const row = extractRowRaw(panel);
+    if (!row) return;
 
-    const obs = new MutationObserver(() => patch(panel));
-    obs.observe(panel, { childList: true, subtree: true });
+    const key = buildRowKey(row);
+    if (panel.getAttribute(PATCH_KEY)===key) return;
 
-    patch(panel);
-  }
+    panel.querySelector(`#${WRAP_ID}`)?.remove();
+    const wrap = document.createElement("div");
+    wrap.innerHTML = await render(row);
 
-  document.addEventListener("DOMContentLoaded", init);
+    const top = panel.querySelector(".row");
+    panel.insertBefore(wrap.firstElementChild, top?.nextSibling || panel.firstChild);
+
+    panel.setAttribute(PATCH_KEY,key);
+    bindHuman(panel);
+  };
+
+  const init = ()=>{
+    const p = document.getElementById(DETAIL_ID);
+    if (!p) return;
+    new MutationObserver(()=>patch(p)).observe(p,{childList:true,subtree:true});
+    patch(p);
+  };
+
+  document.addEventListener("DOMContentLoaded",init);
 })();
