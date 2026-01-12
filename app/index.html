@@ -140,12 +140,17 @@
 
     a{ color: var(--link); }
 
+    /* ✅ FIX CRÍTICO:
+       Antes tenías white-space: pre-wrap + monospace en TODO el panel.
+       Eso te rompe tablas/anchos/scroll. El raw JSON lo maneja el patch.
+    */
     #detailPanel{
       display:none;
-      white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 12px;
+      font-family:var(--font);
+      font-size: 13px;
       color: var(--text);
+      white-space: normal;
+      overflow: hidden;
     }
 
     .muted{ color: var(--muted); }
@@ -218,10 +223,11 @@
 
     .hidden{ display:none !important; }
 
-    /* ✅ agregado: wrapper para scroll horizontal interno */
+    /* wrapper para scroll horizontal interno */
     .cfcTableScroll{
       overflow:auto;
       max-width:100%;
+      -webkit-overflow-scrolling: touch;
     }
   </style>
 </head>
@@ -284,7 +290,10 @@
 <script src="modules/export.js"></script>
 
 <script src="ui.js"></script>
-<script src="patch_detalle_v4.js"></script>
+
+<!-- ✅ nuevo patch v5 (cambiá el nombre así NO te agarra caché) -->
+<script src="patch_detalle_v5.js"></script>
+
 <script src="app.js"></script>
 
 </body>
