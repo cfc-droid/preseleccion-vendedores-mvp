@@ -1,9 +1,10 @@
 // =====================================================
-// PATCH DETALLE V3 — FINAL ESTABLE
+// PATCH DETALLE V3 — FINAL ESTABLE (CORREGIDO)
 // =====================================================
 // - NO toca ui.js ni app.js
-// - Oculta SOLO la Parte 1/3 original (display:none)
-// - Inserta Parte 1/3 nueva ARRIBA
+// - Remueve cualquier resto del Patch V2 si existe (#detalleV2_wrap)
+// - No oculta tarjetas incorrectas: oculta SOLO la Parte 1/3 vieja
+// - Inserta Parte 1/3 nueva en un punto estable (antes del JSON final)
 // - 3 columnas automáticas (solo si hay respuesta)
 // - 2 columnas humanas editables (obs + porcentaje)
 // - Porcentaje permitido: 0 o 8,33
@@ -120,10 +121,27 @@
     catch { return null; }
   };
 
+  const findJsonDiv = panel => {
+    const divs = [...panel.querySelectorAll("div")];
+    return divs.find(d =>
+      (d.textContent || "").trim().startsWith("{") &&
+      (d.textContent || "").includes('"Marca temporal"')
+    ) || null;
+  };
+
+  // Remueve cualquier resto del patch v2 si existe (evita mezcla/alteraciones)
+  const removeV2IfExists = panel => {
+    panel.querySelector("#detalleV2_wrap")?.remove();
+    panel.querySelector("#detalleV2_style")?.remove();
+  };
+
+  // Oculta SOLO la Parte 1/3 vieja (la original), no toca otras miniCards
   const hideOldParte13 = panel => {
     panel.querySelectorAll(".miniCard").forEach(c => {
-      const t = norm(c.querySelector(".sectionTitle")?.textContent);
-      if (t.includes("parte 1/3")) c.style.display = "none";
+      if (c.id === WRAP_ID) return;
+      const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
+      // Solo la tarjeta que explícitamente es Parte 1/3
+      if (t.startsWith("parte 1/3")) c.style.display = "none";
     });
   };
 
@@ -136,9 +154,12 @@
     s.textContent = `
       #${WRAP_ID} textarea,
       #${WRAP_ID} input{
-        width:100%;padding:8px;border-radius:10px;
+        width:100%;
+        padding:8px;
+        border-radius:10px;
         background:rgba(255,255,255,.03);
-        border:1px solid var(--border);color:var(--text);
+        border:1px solid var(--border);
+        color:var(--text);
       }
     `;
     document.head.appendChild(s);
@@ -272,21 +293,34 @@
 
   const patch = async panel => {
     if (!panel || panel.style.display==="none") return;
+
     ensureStyle();
+
+    // Evitar mezcla con v2
+    removeV2IfExists(panel);
+
+    // Ocultar solo Parte 1/3 vieja
     hideOldParte13(panel);
 
     const row = extractRowRaw(panel);
     if (!row) return;
 
     const key = buildRowKey(row);
-    if (panel.getAttribute(PATCH_KEY)===key) return;
+    if (panel.getAttribute(PATCH_KEY)===key && panel.querySelector(`#${WRAP_ID}`)) return;
 
+    // Remover nuestro wrap anterior
     panel.querySelector(`#${WRAP_ID}`)?.remove();
-    const wrap = document.createElement("div");
-    wrap.innerHTML = await render(row);
 
-    const top = panel.querySelector(".row");
-    panel.insertBefore(wrap.firstElementChild, top?.nextSibling || panel.firstChild);
+    const html = await render(row);
+
+    // Insertar SIEMPRE antes del JSON final (estable)
+    const jsonDiv = findJsonDiv(panel);
+    if (!jsonDiv) return;
+
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+
+    jsonDiv.parentNode.insertBefore(tmp.firstElementChild, jsonDiv);
 
     panel.setAttribute(PATCH_KEY,key);
     bindHuman(panel);
