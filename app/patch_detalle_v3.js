@@ -1,12 +1,13 @@
- // =====================================================
-// PATCH DETALLE V3.1 — FIX UI (SIN TOCAR ui.js / app.js)
+// =====================================================
+// PATCH DETALLE V3.2 — FIX UI (SIN TOCAR ui.js / app.js)
 // =====================================================
 // FIXES:
-// 1) Parte 1/3 NO desaparece (no se oculta nuestro wrap)
+// 1) Inserta PARTE 1/3 siempre (y nunca la oculta)
 // 2) Scroll horizontal/vertical REAL en tablas (sin estirar la página)
 // 3) Oculta cajas "Respuestas/condiciones CORRECTAS" y "INCORRECTAS (por qué)"
 // 4) Parte 2/3: resumen arriba, luego tabla 13 preguntas
 // 5) Parte 3/3: oculta columna "Largo"
+// 6) Marca visual "PATCH V3.2" para confirmar que cargó
 // =====================================================
 
 (() => {
@@ -15,8 +16,6 @@
   const WRAP_ID = "detalleV3_wrap";
   const STYLE_ID = "detalleV3_style";
   const PATCH_KEY = "data-patch-v3-key";
-
-  // Lock anti “doble insert” por MutationObserver + async/await
   const BUSY_ATTR = "data-patch-v3-busy";
 
   const LS_KEY = "cfc_parte13_humano_v1";
@@ -107,6 +106,7 @@
     if (n) QID_TO_HEADER[`Q${n}`] = h;
   });
 
+  // 12 abiertas prioridad alta
   const Q_ABIERTAS = [
     "Q1","Q9","Q13","Q14","Q15","Q18",
     "Q21","Q22","Q23","Q27","Q30","Q31"
@@ -129,26 +129,25 @@
     panel.querySelector("#detalleV2_style")?.remove();
   };
 
-  // LIMPIEZA AGRESIVA: si por cualquier bug quedó más de un WRAP_ID, los borra todos
   const removeAllOurWraps = panel => {
     panel.querySelectorAll(`#${WRAP_ID}`).forEach(n => n.remove());
   };
 
-  // Oculta SOLO la Parte 1/3 vieja (pero jamás nuestra Parte 1/3 nueva)
+  // Oculta SOLO la Parte 1/3 vieja (jamás nuestro WRAP_ID)
   const hideOldParte13Everywhere = panel => {
-    // Caso 1: miniCards
+    // miniCards
     panel.querySelectorAll(".miniCard").forEach(c => {
       if (c.id === WRAP_ID) return;
       const t = norm(c.querySelector(".sectionTitle")?.textContent || "");
       if (t.startsWith("parte 1/3")) c.style.display = "none";
     });
 
-    // Caso 2: sectionTitle sueltos
+    // sectionTitle sueltos
     panel.querySelectorAll(".sectionTitle").forEach(st => {
       const t = norm(st.textContent || "");
       if (!t.startsWith("parte 1/3")) return;
 
-      // Si pertenece a nuestro wrap, NO tocar
+      // Si es nuestro, no tocar
       if (st.closest(`#${WRAP_ID}`)) return;
 
       const mc = st.closest(".miniCard");
@@ -157,7 +156,6 @@
         return;
       }
 
-      // Si no hay miniCard, ocultar un contenedor razonable (no el propio st)
       const container = st.parentElement;
       if (container && container.id !== WRAP_ID) container.style.display = "none";
     });
@@ -197,14 +195,34 @@
     s.id = STYLE_ID;
 
     s.textContent = `
-      /* No estires el layout: el scroll debe ocurrir en wrappers */
+      /* Confirmación visual: si ves este badge, el patch está corriendo */
+      #${DETAIL_ID}::before{
+        content:"PATCH V3.2";
+        position: sticky;
+        top: 0;
+        display:inline-block;
+        margin: 0 0 10px 0;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.08);
+        border: 1px solid rgba(255,255,255,.12);
+        color: rgba(255,255,255,.75);
+        font-size: 12px;
+        z-index: 9999;
+      }
+
+      /* NO estirar página: el scroll va en wrappers internos */
+      html, body { overflow-x: hidden !important; }
+
       #${DETAIL_ID}{
         white-space: normal !important;
         max-width: 100% !important;
+        overflow-x: hidden !important;
       }
 
       #${DETAIL_ID} .miniCard{
         max-width: 100% !important;
+        overflow: hidden !important;
       }
 
       /* Wrapper universal para tablas */
@@ -214,7 +232,7 @@
         margin-top: 10px;
       }
 
-      /* Tablas: si no entran, que scrolleen en su wrapper */
+      /* Tablas: si exceden el ancho, que scrolleen en su wrapper */
       #${DETAIL_ID} table{
         width: max-content !important;
         min-width: 100% !important;
@@ -244,15 +262,15 @@
     document.head.appendChild(s);
   };
 
-  // Asegura que TODA tabla dentro del detalle tenga un wrapper con overflow:auto
+  // Envolver TODA tabla en .cfcTableScroll (si no lo tiene)
   const ensureTableWrappers = panel => {
     const tables = [...panel.querySelectorAll("table")];
     tables.forEach(table => {
       if (table.closest(".cfcTableScroll")) return;
 
       const p = table.parentElement;
-      // Si el padre ya es un “div con overflow”, lo convertimos en wrapper
       if (p && p.tagName === "DIV") {
+        // si el padre ya tenía overflow inline, lo convertimos en wrapper
         const st = (p.getAttribute("style") || "").toLowerCase();
         if (st.includes("overflow")) {
           p.classList.add("cfcTableScroll");
@@ -262,12 +280,10 @@
         }
       }
 
-      // Si no, lo envolvemos nosotros
       const wrap = document.createElement("div");
       wrap.className = "cfcTableScroll";
       wrap.style.overflow = "auto";
       wrap.style.maxWidth = "100%";
-
       table.parentNode?.insertBefore(wrap, table);
       wrap.appendChild(table);
     });
@@ -468,7 +484,6 @@
 
   const patch = async panel => {
     if (!panel || panel.style.display === "none") return;
-
     if (panel.getAttribute(BUSY_ATTR) === "1") return;
     panel.setAttribute(BUSY_ATTR, "1");
 
@@ -476,13 +491,11 @@
       ensureStyle();
       removeV2IfExists(panel);
 
-      // UI fixes primero
       hideCorrectIncorrectBoxes(panel);
       hideParte33LargoColumn(panel);
       fixParte23Order(panel);
       hideOldParte13Everywhere(panel);
 
-      // Scroll wrappers para TODO lo existente
       ensureTableWrappers(panel);
 
       const row = extractRowRaw(panel);
@@ -491,7 +504,6 @@
       const key = buildRowKey(row);
       panel.setAttribute(PATCH_KEY, key);
 
-      // (re)insert nuestra Parte 1/3
       removeAllOurWraps(panel);
 
       const html = await renderParte13(row);
@@ -519,7 +531,7 @@
 
       bindHuman(panel);
 
-      // Reaplicar todo post-insert
+      // post insert
       hideCorrectIncorrectBoxes(panel);
       hideParte33LargoColumn(panel);
       fixParte23Order(panel);
