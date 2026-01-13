@@ -4,28 +4,23 @@
 // "Fila | Nombre | Email | Total | Estado | ..."
 // SIN mover nada para abajo y SIN tocar ui.js.
 //
-// - Busca la tabla dentro de #resultsTable
-// - Aplica position:sticky a TH del THEAD
-// - No crea espaciadores
-// - Reintenta si la tabla se re-renderiza
+// ✅ Fix real:
+// - En Chrome, position:sticky en <th> puede FALLAR si la tabla usa
+//   border-collapse: collapse (muy común). Lo forzamos a "separate".
+// - Aseguramos contexto correcto (wrap position:relative).
+// - Reaplicamos en re-render (MutationObserver) y en resize.
+//
+// NO crea espaciadores.
+// NO cambia maxHeight.
+// NO mueve el layout.
 // ======================================================
 
 (function () {
   const WRAP_ID = "resultsTable";
-  const STICKY_Z = "50";
+  const STICKY_Z = 200; // arriba de filas
+  const TOP_PX = 0;     // si alguna vez necesitás offset: cambiar a 46, etc.
 
-  function isStickyApplied(table) {
-    try {
-      const th = table.querySelector("thead th");
-      if (!th) return false;
-      const cs = getComputedStyle(th);
-      return cs.position === "sticky";
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function applyStickyThead() {
+  function applyOnce() {
     const wrap = document.getElementById(WRAP_ID);
     if (!wrap) return false;
 
@@ -35,66 +30,82 @@
     const thead = table.querySelector("thead");
     if (!thead) return false;
 
-    // Importante: sticky del thead funciona mejor aplicándolo a cada TH
     const ths = Array.from(thead.querySelectorAll("th"));
     if (!ths.length) return false;
 
-    // Si ya está aplicado, no repetimos
-    if (isStickyApplied(table)) return true;
+    // --- Claves para que STICKY funcione bien (sin mover nada) ---
+    // 1) Contexto
+    if (!wrap.style.position) wrap.style.position = "relative";
 
-    // Aseguramos que el contenedor permita scroll horizontal/vertical
-    // (sin cambiar el layout, solo asegura comportamiento sticky)
-    // No forzamos heights acá.
-    wrap.style.overflowX = wrap.style.overflowX || "auto";
+    // 2) Sticky + tablas: en Chrome, con border-collapse: collapse puede fallar.
+    //    Lo forzamos a separate (no cambia visual casi nunca; evita bug de sticky).
+    table.style.borderCollapse = "separate";
+    table.style.borderSpacing = "0";
 
-    // Aplicamos sticky a cada TH
+    // 3) Si el wrap ya scrollea, perfecto. Si no, no forzamos alturas.
+    //    Solo aseguramos que horizontal no rompa.
+    if (!wrap.style.overflowX) wrap.style.overflowX = "auto";
+
+    // --- Aplicar sticky a cada TH ---
     for (const th of ths) {
       th.style.position = "sticky";
-      th.style.top = "0px";
-      th.style.zIndex = STICKY_Z;
+      th.style.top = `${TOP_PX}px`;
+      th.style.zIndex = String(STICKY_Z);
 
-      // Fondo para que no se transparente al scrollear
-      // (sin tocar CSS global)
-      th.style.background = "rgba(10, 12, 18, 0.96)";
+      // Fondo opaco para que no “desaparezca” al pasar filas por debajo
+      th.style.background = "rgba(10, 12, 18, 0.98)";
 
-      // Línea inferior sutil
-      th.style.borderBottom = th.style.borderBottom || "1px solid rgba(255,255,255,0.06)";
+      // Línea inferior sutil (si no existe ya)
+      if (!th.style.borderBottom) {
+        th.style.borderBottom = "1px solid rgba(255,255,255,0.08)";
+      }
+
+      // Asegurar que el sticky no quede transparente por efectos raros
+      th.style.backgroundClip = "padding-box";
     }
 
     return true;
   }
 
-  // Reintentos suaves porque UI re-renderiza tabla al filtrar / cambiar tabs
+  // Reintentos suaves (porque UI re-renderiza)
   let tries = 0;
   function boot() {
-    const ok = applyStickyThead();
+    const ok = applyOnce();
     if (ok) return;
 
     tries++;
-    if (tries < 30) {
-      setTimeout(boot, 150);
+    if (tries < 40) {
+      setTimeout(boot, 120);
     }
   }
 
-  // Observa cambios dentro de #resultsTable para re-aplicar cuando se re-renderiza
   function observeRerenders() {
     const wrap = document.getElementById(WRAP_ID);
     if (!wrap) return;
 
     const mo = new MutationObserver(() => {
-      applyStickyThead();
+      // Reaplicar en el próximo frame (evita aplicar mientras se está pintando)
+      requestAnimationFrame(() => applyOnce());
     });
 
     mo.observe(wrap, { childList: true, subtree: true });
+  }
+
+  function bindResize() {
+    window.addEventListener("resize", () => {
+      requestAnimationFrame(() => applyOnce());
+    });
   }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
       boot();
       observeRerenders();
+      bindResize();
     });
   } else {
     boot();
     observeRerenders();
+    bindResize();
   }
 })();
