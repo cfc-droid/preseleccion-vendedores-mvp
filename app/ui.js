@@ -895,6 +895,16 @@ if (currentFilter === "APROBADO") {
           <td><b>${escapeHtml(p13.totalPct || "—")}</b></td>
           <td><b>${escapeHtml(p13.estadoDef || "—")}</b></td>
 
+          <td style="text-align:center;">
+            <input
+              type="checkbox"
+              data-sentmail="${r.fila}"
+              ${getSentFor(r) ? "checked" : ""}
+              ${(normEmail(r.email || r?.rowRaw?.["Dirección de correo electrónico"]) ? "" : "disabled")}
+              title="Marcá SI si ya le enviaste correo (guardado local en este navegador)"
+            />
+          </td>
+
           <td><a href="#" data-open="${r.fila}">Ver</a></td>
         </tr>
       `;
@@ -915,6 +925,7 @@ if (currentFilter === "APROBADO") {
             <th>RESULTADO DEFINITIVO</th>
             <th>ESTADO DEFINITIVO</th>
 
+            <th>ENVIÉ CORREO</th> 
             <th>Detalle</th>
           </tr>
         </thead>
@@ -942,6 +953,28 @@ if (currentFilter === "APROBADO") {
       });
     });
 
+    // ✅ NUEVO — Guardar “ENVIÉ CORREO (SI/NO)” (manual)
+    tableWrap.querySelectorAll('input[data-sentmail]').forEach(chk => {
+      chk.addEventListener("click", (e) => {
+        // evita que el click en el checkbox abra el detalle (click en <tr>)
+        e.preventDefault();
+        e.stopPropagation();
+
+        // toggle manual (porque prevenimos default)
+        chk.checked = !chk.checked;
+
+        const fila = Number(chk.getAttribute("data-sentmail"));
+        const item = lastPayload.results.find(x => x.fila === fila);
+        if (item) setSentFor(item, chk.checked);
+      });
+
+      chk.addEventListener("change", (e) => {
+        // doble seguro: si el navegador dispara change, no abrir detalle
+        e.stopPropagation();
+      });
+    });
+    
+    
     // ✅ NUEVO: aplicar altura máxima + scroll
     applyResultsTableScroll();
   }
