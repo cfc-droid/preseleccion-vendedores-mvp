@@ -10,10 +10,14 @@
 //   * ESTADO DEFINITIVO (>=70 APROBADO / <70 NO VALIDO)
 // - Escucha evento psv:p13updated y re-render sin romper nada
 // - Export CSV incluye esas columnas
+//
+// ✅ CAMBIO (TU PEDIDO):
+// - Reemplaza "APTO" por "APROBADO" en la UI.
+// - El filtro/contador "APROBADO" sale de ESTADO DEFINITIVO (Parte 1/3).
 // ======================================================
 
 window.UI = (() => {
-  let currentFilter = "ALL"; // ALL | APTO | REVISAR | DESCARTADO
+  let currentFilter = "ALL"; // ALL | APROBADO | REVISAR | DESCARTADO
   let lastPayload = null;
 
   // ✅ NUEVO: Tabla (Resultados) — límite visual de filas (solo UI)
@@ -288,7 +292,7 @@ window.UI = (() => {
     const pctOk = total > 0 ? Math.round((ok / total) * 100) : 0;
 
     let estadoInfo = "—";
-    if (pctOk >= 70) estadoInfo = "APTO";
+    if (pctOk >= 70) estadoInfo = "APROBADO";
     else if (pctOk >= 50) estadoInfo = "REVISAR";
     else estadoInfo = "DESCARTADO";
 
@@ -422,7 +426,7 @@ window.UI = (() => {
         </div>
 
         <div class="hint" style="margin-top:10px;">
-          Regla (solo informativa para Parte 2/3): ≥70% = APTO, 50–69% = REVISAR, &lt;50% = DESCARTADO.
+          Regla (solo informativa para Parte 2/3): ≥70% = APROBADO, 50–69% = REVISAR, &lt;50% = DESCARTADO.
           (Esta parte NO decide el estado IA; es resumen fijo de cerradas.)
         </div>
       </div>
@@ -447,55 +451,19 @@ window.UI = (() => {
   }
 
   function badgeClass(estado) {
-    if (estado === "APTO" || estado === "APTO_AUTO") return "ok";
+    if (estado === "APROBADO") return "ok";
     if (estado === "REVISAR" || estado === "REVISAR_AUTO") return "rev";
+    if (estado === "NO VALIDO") return "bad";
+
+    // fallback original (por si aparece APTO en algún lado viejo)
+    if (estado === "APTO" || estado === "APTO_AUTO") return "ok";
+
     return "bad";
   }
 
   function setStatus(text) {
     const el = document.getElementById("statusText");
     if (el) el.textContent = text;
-  }
-
-  function counts(results) {
-    return {
-      total: results.length,
-      apto: results.filter(r => {
-        const e = estadoUI(r);
-        return e === "APTO" || e === "APTO_AUTO";
-      }).length,
-      revisar: results.filter(r => {
-        const e = estadoUI(r);
-        return e === "REVISAR" || e === "REVISAR_AUTO";
-      }).length,
-      descartado: results.filter(r => {
-        const e = estadoUI(r);
-        return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
-      }).length
-    };
-  }
-
-  function applyFilter(results) {
-    if (currentFilter === "ALL") return results;
-
-    if (currentFilter === "APTO") {
-      return results.filter(r => {
-        const e = estadoUI(r);
-        return e === "APTO" || e === "APTO_AUTO";
-      });
-    }
-
-    if (currentFilter === "REVISAR") {
-      return results.filter(r => {
-        const e = estadoUI(r);
-        return e === "REVISAR" || e === "REVISAR_AUTO";
-      });
-    }
-
-    return results.filter(r => {
-      const e = estadoUI(r);
-      return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
-    });
   }
 
   // -------------------------
@@ -538,6 +506,48 @@ window.UI = (() => {
   }
 
   // -------------------------
+  // Counts + Filters (APROBADO sale de Parte 1/3)
+  // -------------------------
+
+  function counts(results) {
+    return {
+      total: results.length,
+      aprobado: results.filter(r => {
+        const p13 = getP13Def(r);
+        return p13.estadoDef === "APROBADO";
+      }).length,
+      revisar: results.filter(r => {
+        const e = estadoUI(r);
+        return e === "REVISAR" || e === "REVISAR_AUTO";
+      }).length,
+      descartado: results.filter(r => {
+        const e = estadoUI(r);
+        return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
+      }).length
+    };
+  }
+
+  function applyFilter(results) {
+    if (currentFilter === "ALL") return results;
+
+    if (currentFilter === "APROBADO") {
+      return results.filter(r => getP13Def(r).estadoDef === "APROBADO");
+    }
+
+    if (currentFilter === "REVISAR") {
+      return results.filter(r => {
+        const e = estadoUI(r);
+        return e === "REVISAR" || e === "REVISAR_AUTO";
+      });
+    }
+
+    return results.filter(r => {
+      const e = estadoUI(r);
+      return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
+    });
+  }
+
+  // -------------------------
   // Tabs
   // -------------------------
 
@@ -550,7 +560,7 @@ window.UI = (() => {
 
     viewResultados.classList.toggle("hidden", tabId !== "RESULTADOS");
     viewSeleccionados.classList.toggle("hidden", tabId !== "SELECCIONADOS");
-    viewHistorial.classList.toggle("hidden", tabId !== "HISTORIAL");
+    viewHistorial.classList.toggle("hidden", tabId !== " ?");
 
     const filters = document.getElementById("filters");
     filters.classList.toggle("hidden", tabId !== "RESULTADOS");
@@ -607,7 +617,7 @@ window.UI = (() => {
     output.innerHTML = `
       <div class="row">
         <div class="pill">Total filas: <strong>${c.total}</strong></div>
-        <div class="pill">APTO: <strong style="color:var(--ok)">${c.apto}</strong></div>
+        <div class="pill">APROBADO: <strong style="color:var(--ok)">${c.aprobado}</strong></div>
         <div class="pill">REVISAR: <strong style="color:var(--rev)">${c.revisar}</strong></div>
         <div class="pill">DESCARTADO: <strong style="color:var(--bad)">${c.descartado}</strong></div>
         <div class="pill">Versión reglas: <strong>${escapeHtml(version || "—")}</strong></div>
@@ -634,7 +644,7 @@ window.UI = (() => {
       <div class="row">
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           ${mkBtn("ALL", `Todos (${c.total})`)}
-          ${mkBtn("APTO", `APTO (${c.apto})`)}
+          ${mkBtn("APROBADO", `APROBADO (${c.aprobado})`)}
           ${mkBtn("REVISAR", `REVISAR (${c.revisar})`)}
           ${mkBtn("DESCARTADO", `DESCARTADO (${c.descartado})`)}
         </div>
@@ -909,11 +919,12 @@ window.UI = (() => {
 
     const selected = results.filter(r => {
       const e = estadoUI(r);
-      return e === "APTO" || e === "REVISAR" || e === "APTO_AUTO" || e === "REVISAR_AUTO";
+      const p13 = getP13Def(r);
+      return (p13.estadoDef === "APROBADO") || (e === "REVISAR" || e === "REVISAR_AUTO");
     }).sort((a, b) => (a.fila - b.fila));
 
     if (!selected.length) {
-      el.innerHTML = `<div class="muted">No hay seleccionados (APTO/REVISAR) en esta carga.</div>`;
+      el.innerHTML = `<div class="muted">No hay seleccionados (APROBADO/REVISAR) en esta carga.</div>`;
       return;
     }
 
@@ -983,7 +994,7 @@ window.UI = (() => {
     el.innerHTML = `
       <div class="row" style="margin-bottom:10px;">
         <div class="pill">Total seleccionados: <strong>${selected.length}</strong></div>
-        <div class="hint">Seleccionados = APTO + REVISAR. (DESCARTADO_AUTO no se analiza más).</div>
+        <div class="hint">Seleccionados = APROBADO + REVISAR. (DESCARTADO_AUTO no se analiza más).</div>
       </div>
       <div style="display:grid; gap:12px;">${cards}</div>
     `;
@@ -1031,14 +1042,14 @@ window.UI = (() => {
     }
 
     const rows = hist.map(h => {
-      const c = h.counts || { total: 0, apto: 0, revisar: 0, descartado: 0 };
+      const c = h.counts || { total: 0, aprobado: 0, revisar: 0, descartado: 0 };
       return `
         <tr>
           <td>${escapeHtml(h.runAt || "—")}</td>
           <td>${escapeHtml(h.fileName || "—")}</td>
           <td><span class="kbd">${escapeHtml(h.fingerprint || "—")}</span></td>
           <td>${c.total}</td>
-          <td style="color:var(--ok)">${c.apto}</td>
+          <td style="color:var(--ok)">${c.aprobado}</td>
           <td style="color:var(--rev)">${c.revisar}</td>
           <td style="color:var(--bad)">${c.descartado}</td>
           <td><button class="btn" data-load="${escapeHtml(h.runId)}">Cargar</button></td>
@@ -1058,7 +1069,7 @@ window.UI = (() => {
             <th>Archivo</th>
             <th>Fingerprint</th>
             <th>Total</th>
-            <th>APTO</th>
+            <th>APROBADO</th>
             <th>REVISAR</th>
             <th>DESC</th>
             <th>Acción</th>
@@ -1180,7 +1191,7 @@ window.UI = (() => {
         runId: payload.meta?.runId || String(Date.now()),
         runAt: payload.meta?.runAt || new Date().toLocaleString(),
         fileName: payload.meta?.fileName || "—",
-        fingerprint: payload.meta?.fingerprint || "—",
+        fingerprint: payload.meta?.f `"—",
         version: payload.version || "—",
         counts: c,
         meta: payload.meta || {},
