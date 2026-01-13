@@ -6,6 +6,9 @@
 // - Parte 1/3 humano: "cfc_preseleccion_p13_v1" (si existiera)
 // - Ediciones Parte 1/3 (patch_detalle_v2): prefijo "p13_edit_v2__"
 //
+// ✅ NUEVO (mínimo):
+// - “ENVIÉ CORREO” store: "cfc_preseleccion_sentmail_v1"
+//
 // Botones (index.html):
 // - btnBackupSave   -> guarda snapshot en localStorage (slot)
 // - btnBackupExport -> descarga .json
@@ -19,6 +22,9 @@
   const KEY_HISTORY = "cfc_preseleccion_history_v1";
   const KEY_P13_STORE = "cfc_preseleccion_p13_v1"; // usado por UI (aunque patch hoy usa otro formato)
   const PREFIX_P13_EDIT = "p13_edit_v2__";
+
+  // ✅ NUEVO — store de “ENVIÉ CORREO”
+  const KEY_SENTMAIL = "cfc_preseleccion_sentmail_v1";
 
   // Slot local de “Guardar”
   const KEY_BACKUP_SLOT = "psv10b_backup_slot_v1";
@@ -36,7 +42,7 @@
     const keys = [];
 
     // Exactas
-    keys.push(KEY_ACTIVE_DATASET, KEY_HISTORY, KEY_P13_STORE, KEY_BACKUP_SLOT);
+    keys.push(KEY_ACTIVE_DATASET, KEY_HISTORY, KEY_P13_STORE, KEY_SENTMAIL, KEY_BACKUP_SLOT);
 
     // Prefijo (p13_edit_v2__)
     try {
@@ -70,7 +76,8 @@
         active_dataset: KEY_ACTIVE_DATASET,
         history: KEY_HISTORY,
         p13_store: KEY_P13_STORE,
-        p13_edit_prefix: PREFIX_P13_EDIT
+        p13_edit_prefix: PREFIX_P13_EDIT,
+        sentmail_store: KEY_SENTMAIL
       },
       items
     };
@@ -131,6 +138,7 @@
       k === KEY_ACTIVE_DATASET ||
       k === KEY_HISTORY ||
       k === KEY_P13_STORE ||
+      k === KEY_SENTMAIL ||
       k === KEY_BACKUP_SLOT ||
       (typeof k === "string" && k.startsWith(PREFIX_P13_EDIT));
 
@@ -184,6 +192,7 @@
         `- ${KEY_ACTIVE_DATASET}\n` +
         `- ${KEY_HISTORY}\n` +
         `- ${KEY_P13_STORE}\n` +
+        `- ${KEY_SENTMAIL}\n` +
         `- ${PREFIX_P13_EDIT}*\n\n` +
         "¿Continuar?"
       );
