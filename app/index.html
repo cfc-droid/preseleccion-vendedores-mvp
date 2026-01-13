@@ -235,10 +235,16 @@
       <div class="row" style="margin-top:10px;">
         <div class="tabs" id="topTabs"></div>
 
-        <div class="rightTools">
-          <button class="btn" id="btnExportCSV" title="Exporta los resultados actuales a CSV">Exportar CSV</button>
-          <button class="btn" id="btnClearHistory" title="Borra historial guardado en este navegador">Borrar historial</button>
-        </div>
+<div class="rightTools">
+  <button class="btn" id="btnExportCSV" title="Exporta los resultados actuales a CSV">Exportar CSV</button>
+  <button class="btn" id="btnClearHistory" title="Borra historial guardado en este navegador">Borrar historial</button>
+
+  <button class="btn" id="btnBackupSave" title="Guarda un snapshot en este navegador (slot local)">Guardar backup</button>
+  <button class="btn" id="btnBackupExport" title="Descarga un .json con el estado (dataset + historial + parte humana)">Exportar backup</button>
+  <button class="btn" id="btnBackupImport" title="Importa un .json y restaura el estado (sobrescribe)">Importar backup</button>
+
+  <input type="file" id="backupFileInput" accept="application/json" style="display:none;" />
+</div>
       </div>
 
       <div class="hint">
@@ -276,6 +282,7 @@
 <script src="modules/human.js"></script>
 <script src="modules/dedupe.js"></script>
 <script src="modules/export.js"></script>
+<script src="modules/backup.js"></script>  
 
 <script src="ui.js"></script>
 <script src="patch_detalle_v2.js"></script>  
