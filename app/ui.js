@@ -1190,6 +1190,7 @@ if (currentFilter === "APROBADO") {
       "score_auto","score_humano","score_total","maxScore","percent","pendiente_humano",
       "estado","motivo",
       "resultado_definitivo","estado_definitivo",
+      "envie_correo",
       "flags"
     ];
 
@@ -1215,6 +1216,7 @@ if (currentFilter === "APROBADO") {
         r.motivo || "",
         p13.totalPct || "",
         p13.estadoDef || "",
+        getSentFor(r) ? "SI" : "NO",
         (r.flags || []).join("|")
       ].map(toCSVCell).join(",");
 
