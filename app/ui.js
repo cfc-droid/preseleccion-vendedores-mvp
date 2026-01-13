@@ -895,15 +895,16 @@ if (currentFilter === "APROBADO") {
           <td><b>${escapeHtml(p13.totalPct || "—")}</b></td>
           <td><b>${escapeHtml(p13.estadoDef || "—")}</b></td>
 
-          <td style="text-align:center;">
-            <input
-              type="checkbox"
-              data-sentmail="${r.fila}"
-              ${getSentFor(r) ? "checked" : ""}
-              ${(normEmail(r.email || r?.rowRaw?.["Dirección de correo electrónico"]) ? "" : "disabled")}
-              title="Marcá SI si ya le enviaste correo (guardado local en este navegador)"
-            />
-          </td>
+<td style="text-align:center;">
+  <button
+    class="btn"
+    data-sentmail="${r.fila}"
+    ${(normEmail(r.email || r?.rowRaw?.["Dirección de correo electrónico"]) ? "" : "disabled")}
+    title="Click para alternar SI/NO (guardado local en este navegador)"
+  >
+    ${getSentFor(r) ? "SI" : "NO"}
+  </button>
+</td>
 
           <td><a href="#" data-open="${r.fila}">Ver</a></td>
         </tr>
