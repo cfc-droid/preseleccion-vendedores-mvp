@@ -1,4 +1,4 @@
-// ======================================================
+// ======================================================C 
 // UI — FASE D (SALIDA)
 // tabla + filtros + detalle por fila
 // + pestañas: Resultados | Seleccionados | Historial
@@ -826,14 +826,13 @@ window.UI = (() => {
     const rowsHtml = filtered.map(r => {
       const eUI = estadoUI(r);
       const estadoBadge = `<span class="badge ${badgeClass(eUI)}">${escapeHtml(eUI)}</span>`;
-      const flagsCount = (r.flags || []).length;
 
       const nombre = escapeHtml(r.nombre || "—");
       const email = escapeHtml(r.email || "—");
       const motivo = escapeHtml(r.motivo || "—");
 
-      const { max, auto, hum, total, pct } = scoreParts(r);
-      const pend = r.pendiente_humano ? "SÍ" : "NO";
+      // mantenemos cálculo para Total (sin mostrar Auto/Hum/Pend/Flags en tabla general)
+      const { max, total, pct } = scoreParts(r);
 
       const p13 = getP13Def(r);
 
@@ -842,17 +841,14 @@ window.UI = (() => {
           <td>${r.fila}</td>
           <td>${nombre}</td>
           <td>${email}</td>
-          <td><b>${auto}</b></td>
-          <td><b>${hum}</b></td>
+
           <td><b>${total}/${max}</b> <span class="kbd">${pct}%</span></td>
-          <td>${escapeHtml(pend)}</td>
           <td>${estadoBadge}</td>
           <td>${motivo}</td>
 
           <td><b>${escapeHtml(p13.totalPct || "—")}</b></td>
           <td><b>${escapeHtml(p13.estadoDef || "—")}</b></td>
 
-          <td>${flagsCount ? escapeHtml(String(flagsCount)) : "—"}</td>
           <td><a href="#" data-open="${r.fila}">Ver</a></td>
         </tr>
       `;
@@ -865,17 +861,14 @@ window.UI = (() => {
             <th>Fila</th>
             <th>Nombre</th>
             <th>Email</th>
-            <th>Auto</th>
-            <th>Hum</th>
+
             <th>Total</th>
-            <th>Pend</th>
             <th>Estado</th>
             <th>Motivo</th>
 
             <th>RESULTADO DEFINITIVO</th>
             <th>ESTADO DEFINITIVO</th>
 
-            <th>Flags</th>
             <th>Detalle</th>
           </tr>
         </thead>
