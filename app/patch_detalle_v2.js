@@ -1,17 +1,3 @@
-preseleccion-vendedores-mvp/app
-/patch_detalle_v2.js
-Go to file
-t
-cfc-droid
-cfc-droid
-Update patch_detalle_v2.js
-6ea5ebe
- · 
-3 hours ago
-
-Code
-
-Blame
 // =====================================================
 // PATCH DETALLE V2 (SIN TOCAR ui.js)
 // - Renderiza 3 partes del detalle estilo mock
