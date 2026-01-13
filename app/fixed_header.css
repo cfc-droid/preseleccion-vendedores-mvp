@@ -1,0 +1,63 @@
+/* fixed_header.css */
+/* Encabezado fijo para Resultados (sin tocar CSS global) */
+
+#psvFixedHeaderWrap {
+  position: sticky;
+  top: 0;
+  z-index: 9999;
+  margin-bottom: 10px;
+}
+
+#psvFixedHeaderBar {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(11,11,15,0.92);
+  box-shadow: var(--shadow);
+  padding: 10px;
+  backdrop-filter: blur(6px);
+}
+
+#psvFixedHeaderTopRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+#psvFixedHeaderTitle {
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  color: var(--text);
+}
+
+#psvFixedHeaderScroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+}
+
+#psvFixedHeaderTable {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+#psvFixedHeaderTable th {
+  padding: 10px 10px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+}
+
+/* Estado oculto */
+.psvFixedHeaderHidden {
+  display: none !important;
+}
