@@ -457,33 +457,38 @@ window.UI = (() => {
     if (el) el.textContent = text;
   }
 
-  function counts(results) {
-    return {
-      total: results.length,
-      apto: results.filter(r => {
-        const e = estadoUI(r);
-        return e === "APTO" || e === "APTO_AUTO";
-      }).length,
-      revisar: results.filter(r => {
-        const e = estadoUI(r);
-        return e === "REVISAR" || e === "REVISAR_AUTO";
-      }).length,
-      descartado: results.filter(r => {
-        const e = estadoUI(r);
-        return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
-      }).length
-    };
-  }
+function counts(results) {
+  return {
+    total: results.length,
+
+    // ✅ NUEVO: APROBADO sale de Parte 1/3 humano (ESTADO DEFINITIVO)
+    aprobado: results.filter(r => {
+      const p13 = getP13Def(r);
+      return p13.estadoDef === "APROBADO";
+    }).length,
+
+    // Estos dos siguen siendo por estadoUI (Parte 2/3 automático)
+    revisar: results.filter(r => {
+      const e = estadoUI(r);
+      return e === "REVISAR" || e === "REVISAR_AUTO";
+    }).length,
+
+    descartado: results.filter(r => {
+      const e = estadoUI(r);
+      return e === "DESCARTADO_AUTO" || e === "DESCARTADO";
+    }).length
+  };
+}
 
   function applyFilter(results) {
     if (currentFilter === "ALL") return results;
 
-    if (currentFilter === "APTO") {
-      return results.filter(r => {
-        const e = estadoUI(r);
-        return e === "APTO" || e === "APTO_AUTO";
-      });
-    }
+if (currentFilter === "APROBADO") {
+  return results.filter(r => {
+    const p13 = getP13Def(r);
+    return p13.estadoDef === "APROBADO";
+  });
+}
 
     if (currentFilter === "REVISAR") {
       return results.filter(r => {
