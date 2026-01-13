@@ -1036,14 +1036,14 @@ if (currentFilter === "APROBADO") {
     }
 
     const rows = hist.map(h => {
-      const c = h.counts || { total: 0, apto: 0, revisar: 0, descartado: 0 };
+      const c = h.counts || { total: 0, aprobado: 0, revisar: 0, descartado: 0 };
       return `
         <tr>
           <td>${escapeHtml(h.runAt || "—")}</td>
           <td>${escapeHtml(h.fileName || "—")}</td>
           <td><span class="kbd">${escapeHtml(h.fingerprint || "—")}</span></td>
           <td>${c.total}</td>
-          <td style="color:var(--ok)">${c.apto}</td>
+          <td style="color:var(--ok)">${c.aprobado}</td>
           <td style="color:var(--rev)">${c.revisar}</td>
           <td style="color:var(--bad)">${c.descartado}</td>
           <td><button class="btn" data-load="${escapeHtml(h.runId)}">Cargar</button></td>
@@ -1063,7 +1063,7 @@ if (currentFilter === "APROBADO") {
             <th>Archivo</th>
             <th>Fingerprint</th>
             <th>Total</th>
-            <th>APTO</th>
+            <th>APROBADO</th>
             <th>REVISAR</th>
             <th>DESC</th>
             <th>Acción</th>
