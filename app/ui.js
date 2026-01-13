@@ -771,6 +771,7 @@ window.UI = (() => {
   // -------------------------
 
   // ✅ NUEVO: aplicar alto/scroll al contenedor de tabla (sin tocar CSS global)
+  // ✅ FIX: mantener header (thead) fijo dentro del scroll (sticky) para que no “se pierda” al bajar.
   function applyResultsTableScroll() {
     const wrap = document.getElementById("resultsTable");
     if (!wrap) return;
@@ -786,6 +787,18 @@ window.UI = (() => {
       wrap.style.overflowY = "";
       wrap.style.overflowX = "";
       return;
+    }
+
+    // ✅ FIX: sticky header dentro del contenedor con overflow
+    if (thead) {
+      const bg = (window.getComputedStyle(wrap).backgroundColor || "").trim() || "rgba(0,0,0,0)";
+      thead.querySelectorAll("th").forEach(th => {
+        th.style.position = "sticky";
+        th.style.top = "0px";
+        th.style.zIndex = "3";
+        th.style.background = bg;
+        th.style.backgroundClip = "padding-box";
+      });
     }
 
     const headH = thead ? thead.getBoundingClientRect().height : 0;
