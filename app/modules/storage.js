@@ -7,11 +7,63 @@
 window.StoragePSV = (() => {
   const LS_KEY = "psv10b_active_dataset";
 
+  // ✅ NUEVO (mínimo, para MAIL 2 VECES):
+  // Guardamos una copia de results "completa" dentro de meta para poder restaurar duplicados
+  // al importar backup / abrir en incógnito.
+  const META_RAW_RESULTS_KEY = "__raw_results_v1";
+
   function isObject(x){ return x && typeof x === "object" && !Array.isArray(x); }
+
+  function deepCloneJSON(x) {
+    try { return JSON.parse(JSON.stringify(x)); } catch (_) { return x; }
+  }
+
+  function ensureRawResults(dataset) {
+    try {
+      if (!dataset || !isObject(dataset)) return dataset;
+
+      // Asegurar meta
+      if (!isObject(dataset.meta)) dataset.meta = {};
+
+      // Si ya existe y es array, no lo tocamos
+      if (Array.isArray(dataset.meta[META_RAW_RESULTS_KEY])) return dataset;
+
+      // Si results existe, guardamos snapshot completo
+      if (Array.isArray(dataset.results)) {
+        dataset.meta[META_RAW_RESULTS_KEY] = deepCloneJSON(dataset.results);
+      }
+
+      return dataset;
+    } catch (_) {
+      return dataset;
+    }
+  }
+
+  function normalizeDatasetOnLoad(ds) {
+    // ✅ NUEVO (mínimo, para MAIL 2 VECES):
+    // Si el dataset trae snapshot completo en meta.__raw_results_v1, lo usamos como results.
+    try {
+      if (!ds || !isObject(ds)) return ds;
+      if (!isObject(ds.meta)) return ds;
+
+      const raw = ds.meta[META_RAW_RESULTS_KEY];
+      if (Array.isArray(raw) && raw.length) {
+        // Si results actual está vacío o es menor, restauramos el "completo"
+        if (!Array.isArray(ds.results) || ds.results.length < raw.length) {
+          ds.results = raw;
+        }
+      }
+
+      return ds;
+    } catch (_) {
+      return ds;
+    }
+  }
 
   function saveActiveDataset(dataset) {
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify(dataset || null));
+      const ds = ensureRawResults(dataset);
+      localStorage.setItem(LS_KEY, JSON.stringify(ds || null));
       return true;
     } catch (e) {
       console.error("saveActiveDataset error:", e);
@@ -24,7 +76,7 @@ window.StoragePSV = (() => {
       const raw = localStorage.getItem(LS_KEY);
       if (!raw) return null;
       const obj = JSON.parse(raw);
-      return obj || null;
+      return normalizeDatasetOnLoad(obj || null);
     } catch (e) {
       console.error("loadActiveDataset error:", e);
       return null;
@@ -84,8 +136,11 @@ window.StoragePSV = (() => {
           return;
         }
 
-        saveActiveDataset(ds);
-        if (typeof onDone === "function") onDone(ds);
+        // ✅ NUEVO (mínimo): si trae snapshot completo, lo preferimos
+        const normalized = normalizeDatasetOnLoad(ds);
+
+        saveActiveDataset(normalized);
+        if (typeof onDone === "function") onDone(normalized);
       } catch (e) {
         console.error("importActiveDatasetJSON error:", e);
         alert("No se pudo importar JSON (archivo inválido).");
