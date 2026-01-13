@@ -771,7 +771,6 @@ window.UI = (() => {
   // -------------------------
 
   // ✅ NUEVO: aplicar alto/scroll al contenedor de tabla (sin tocar CSS global)
-  // ✅ FIX: forzar sticky header incluso si CSS tiene !important (usando setProperty con "important")
   function applyResultsTableScroll() {
     const wrap = document.getElementById("resultsTable");
     if (!wrap) return;
@@ -787,24 +786,6 @@ window.UI = (() => {
       wrap.style.overflowY = "";
       wrap.style.overflowX = "";
       return;
-    }
-
-    // ✅ FIX: asegurar stacking context del contenedor
-    wrap.style.position = wrap.style.position || "relative";
-
-    // ✅ FIX: sticky header dentro del contenedor con overflow (con prioridad "important")
-    if (thead) {
-      // background: intentamos usar el fondo del propio tableWrap; si es transparente, dejamos igual
-      const bgWrap = (window.getComputedStyle(wrap).backgroundColor || "").trim();
-      const bg = (bgWrap && bgWrap !== "rgba(0, 0, 0, 0)" && bgWrap !== "transparent") ? bgWrap : "";
-
-      thead.querySelectorAll("th").forEach(th => {
-        th.style.setProperty("position", "sticky", "important");
-        th.style.setProperty("top", "0px", "important");
-        th.style.setProperty("z-index", "3", "important");
-        if (bg) th.style.setProperty("background", bg, "important");
-        th.style.setProperty("background-clip", "padding-box", "important");
-      });
     }
 
     const headH = thead ? thead.getBoundingClientRect().height : 0;
