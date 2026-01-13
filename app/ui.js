@@ -13,7 +13,7 @@
 // ======================================================
 
 window.UI = (() => {
-  let currentFilter = "ALL"; // ALL | APTO | REVISAR | DESCARTADO
+  let currentFilter = "ALL"; // ALL | APROBADO | REVISAR | DESCARTADO
   let lastPayload = null;
 
   // ✅ NUEVO: Tabla (Resultados) — límite visual de filas (solo UI)
