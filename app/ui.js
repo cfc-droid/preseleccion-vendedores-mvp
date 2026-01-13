@@ -19,6 +19,12 @@ window.UI = (() => {
   // ✅ NUEVO: Tabla (Resultados) — límite visual de filas (solo UI)
   let tableMaxRows = 5; // 3 | 5 | 10
 
+  // ✅ NUEVO — Deduplicar por email (tomar SOLO el último formulario por mail)
+  let dedupeEmails = true; // ON por defecto
+
+  // cache de análisis por email (se recalcula por renderTable)
+  let _EMAIL_STATS = null;
+
   let currentTab = "RESULTADOS"; // RESULTADOS | SELECCIONADOS | HISTORIAL
   const LS_KEY = "cfc_preseleccion_history_v1";
 
@@ -33,6 +39,119 @@ window.UI = (() => {
 
   function normEmail(v) {
     return String(v ?? "").trim().toLowerCase();
+  }
+
+  // ======================================================
+  // ✅ NUEVO — Dedupe por email: "solo el último formulario"
+  // Usa: Marca temporal (preferido). Si falla, usa fila como fallback.
+  // Tag:
+  //  - NO = email único
+  //  - SI = email repetido pero esta fila NO es la última (anterior)
+  //  - ULTIMO = email repetido y esta fila ES la última
+  // ======================================================
+
+  function parseMarcaTemporalToMs(v) {
+    // Espera típicos formatos Google Forms/Sheets:
+    // 1) "13/01/2026 17:09:12"
+    // 2) "13/1/2026 17:09"
+    // 3) si cae otro formato, intenta Date.parse()
+    const s = String(v ?? "").trim();
+    if (!s) return NaN;
+
+    // dd/mm/yyyy hh:mm(:ss)?
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (m) {
+      const dd = Number(m[1]);
+      const mm = Number(m[2]);
+      const yyyy = Number(m[3]);
+      const hh = Number(m[4] ?? 0);
+      const mi = Number(m[5] ?? 0);
+      const ss = Number(m[6] ?? 0);
+      const d = new Date(yyyy, mm - 1, dd, hh, mi, ss);
+      return d.getTime();
+    }
+
+    const t = Date.parse(s);
+    return isFinite(t) ? t : NaN;
+  }
+
+  function buildEmailStats(allResultsSortedByFilaAsc) {
+    const byEmail = {}; // email -> { count, bestFila, bestMs }
+
+    // 1) contar + detectar el "último" (best) por timestamp, tie-break por fila
+    for (const r of allResultsSortedByFilaAsc) {
+      const em = normEmail(r?.email || r?.rowRaw?.["Dirección de correo electrónico"]);
+      if (!em) continue;
+
+      const rr = r?.rowRaw || {};
+      const ms = parseMarcaTemporalToMs(rr["Marca temporal"]);
+      const fila = Number(r?.fila ?? 0) || 0;
+
+      if (!byEmail[em]) {
+        byEmail[em] = { count: 1, bestFila: fila, bestMs: isFinite(ms) ? ms : NaN };
+        continue;
+      }
+
+      byEmail[em].count += 1;
+
+      const curBestMs = byEmail[em].bestMs;
+      const curBestFila = byEmail[em].bestFila;
+
+      // regla:
+      // - si ms es válido y bestMs no: gana ms
+      // - si ambos ms válidos: mayor ms gana
+      // - si empate o ms inválidos: mayor fila gana
+      let replace = false;
+
+      if (isFinite(ms) && !isFinite(curBestMs)) replace = true;
+      else if (isFinite(ms) && isFinite(curBestMs) && ms > curBestMs) replace = true;
+      else if (
+        ((isFinite(ms) && isFinite(curBestMs) && ms === curBestMs) || (!isFinite(ms) && !isFinite(curBestMs)))
+        && fila > curBestFila
+      ) replace = true;
+      else if (!isFinite(ms) && isFinite(curBestMs)) replace = false;
+
+      if (replace) {
+        byEmail[em].bestMs = isFinite(ms) ? ms : byEmail[em].bestMs;
+        byEmail[em].bestFila = fila;
+      }
+    }
+
+    function isDuplicate(r) {
+      const em = normEmail(r?.email || r?.rowRaw?.["Dirección de correo electrónico"]);
+      if (!em) return false;
+      return (byEmail[em]?.count || 0) > 1;
+    }
+
+    function isLatest(r) {
+      const em = normEmail(r?.email || r?.rowRaw?.["Dirección de correo electrónico"]);
+      if (!em) return true; // sin email no dedupe
+      const fila = Number(r?.fila ?? 0) || 0;
+      return fila === (byEmail[em]?.bestFila || fila);
+    }
+
+    function tag(r) {
+      const em = normEmail(r?.email || r?.rowRaw?.["Dirección de correo electrónico"]);
+      if (!em) return "—";
+      const info = byEmail[em];
+      if (!info || info.count <= 1) return "NO";
+      return isLatest(r) ? "ULTIMO" : "SI";
+    }
+
+    function applyDedupe(list) {
+      if (!dedupeEmails) return list;
+      return list.filter(r => isLatest(r));
+    }
+
+    function dupCount() {
+      let c = 0;
+      for (const r of allResultsSortedByFilaAsc) {
+        if (isDuplicate(r) && !isLatest(r)) c++;
+      }
+      return c;
+    }
+
+    return { byEmail, isDuplicate, isLatest, tag, applyDedupe, dupCount };
   }
 
   function loadSentStore() {
@@ -692,6 +811,13 @@ if (currentFilter === "APROBADO") {
             <button class="btn ${tableMaxRows===10 ? "active" : ""}" data-maxrows="10">10</button>
           </div>
 
+          <div class="pill">
+            Dedupe mail:
+            <button class="btn ${dedupeEmails ? "active" : ""}" data-dedupe="1">
+              ${dedupeEmails ? "ON (solo último)" : "OFF"}
+            </button>
+          </div>
+
           <div class="pill">Orden: <strong>Fila asc</strong></div>
         </div>
       </div>
@@ -712,6 +838,16 @@ if (currentFilter === "APROBADO") {
         tableMaxRows = Number(btn.getAttribute("data-maxrows")) || 5;
         renderFilters(lastPayload.results);
         applyResultsTableScroll();
+      });
+    });
+
+    // ✅ NUEVO: toggle dedupe por email (solo último formulario)
+    filters.querySelectorAll("button[data-dedupe]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        dedupeEmails = !dedupeEmails;
+        renderFilters(lastPayload.results);
+        renderTable(lastPayload.results);
+        hideDetail();
       });
     });
   }
@@ -858,7 +994,12 @@ if (currentFilter === "APROBADO") {
     const tableWrap = document.getElementById("resultsTable");
 
     const sorted = [...results].sort((a, b) => (a.fila - b.fila));
-    const filtered = applyFilter(sorted);
+
+    // ✅ NUEVO: stats por email (para tag + dedupe)
+    _EMAIL_STATS = buildEmailStats(sorted);
+
+    const filteredBase = applyFilter(sorted);
+    const filtered = _EMAIL_STATS.applyDedupe(filteredBase);
 
     if (!filtered.length) {
       tableWrap.innerHTML = `<div class="muted">No hay filas en este filtro.</div>`;
@@ -895,6 +1036,8 @@ if (currentFilter === "APROBADO") {
           <td><b>${escapeHtml(p13.totalPct || "—")}</b></td>
           <td><b>${escapeHtml(p13.estadoDef || "—")}</b></td>
 
+          <td style="text-align:center;"><b>${escapeHtml(_EMAIL_STATS ? _EMAIL_STATS.tag(r) : "—")}</b></td>
+
 <td style="text-align:center;">
   <button
     class="btn"
@@ -926,6 +1069,7 @@ if (currentFilter === "APROBADO") {
             <th>RESULTADO DEFINITIVO</th>
             <th>ESTADO DEFINITIVO</th>
 
+            <th>MAIL 2 VECES</th>
             <th>ENVIÉ CORREO</th> 
             <th>Detalle</th>
           </tr>
@@ -1188,6 +1332,7 @@ tableWrap.querySelectorAll('button[data-sentmail]').forEach(btn => {
       "score_auto","score_humano","score_total","maxScore","percent","pendiente_humano",
       "estado","motivo",
       "resultado_definitivo","estado_definitivo",
+      "mail_2_veces",
       "envie_correo",
       "flags"
     ];
@@ -1214,6 +1359,7 @@ tableWrap.querySelectorAll('button[data-sentmail]').forEach(btn => {
         r.motivo || "",
         p13.totalPct || "",
         p13.estadoDef || "",
+        (_EMAIL_STATS ? _EMAIL_STATS.tag(r) : ""),
         getSentFor(r) ? "SI" : "NO",
         (r.flags || []).join("|")
       ].map(toCSVCell).join(",");
