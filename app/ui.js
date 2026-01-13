@@ -25,6 +25,47 @@ window.UI = (() => {
   // Parte 1/3 humano (localStorage) — misma key que patch_detalle_v2.js
   const LS_P13_KEY = "cfc_preseleccion_p13_v1";
 
+    // ======================================================
+  // ✅ NUEVO — Opción 2: “ENVIÉ CORREO (SI/NO)” (manual)
+  // Guardado local por email (persistente por navegador)
+  // ======================================================
+  const LS_SENTMAIL_KEY = "cfc_preseleccion_sentmail_v1";
+
+  function normEmail(v) {
+    return String(v ?? "").trim().toLowerCase();
+  }
+
+  function loadSentStore() {
+    try {
+      const raw = localStorage.getItem(LS_SENTMAIL_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === "object") ? obj : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveSentStore(obj) {
+    try {
+      localStorage.setItem(LS_SENTMAIL_KEY, JSON.stringify(obj || {}));
+    } catch (_) {}
+  }
+
+  function getSentFor(r) {
+    const st = loadSentStore();
+    const em = normEmail(r?.email || r?.rowRaw?.["Dirección de correo electrónico"]);
+    if (!em) return false;
+    return !!st[em];
+  }
+
+  function setSentFor(r, val) {
+    const st = loadSentStore();
+    const em = normEmail(r?.email || r?.rowRaw?.["Dirección de correo electrónico"]);
+    if (!em) return; // si no hay email, no guardamos
+    st[em] = !!val;
+    saveSentStore(st);
+  }
+
   // ======================================================
   // PASO 2.4 — Mapeo QID -> Header oficial (desde EXPECTED_HEADERS)
   // (copiado de app.js para que UI pueda separar secciones en Detalle)
