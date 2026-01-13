@@ -16,6 +16,9 @@ window.UI = (() => {
   let currentFilter = "ALL"; // ALL | APTO | REVISAR | DESCARTADO
   let lastPayload = null;
 
+  // ✅ NUEVO: Tabla (Resultados) — límite visual de filas (solo UI)
+  let tableMaxRows = 5; // 3 | 5 | 10
+
   let currentTab = "RESULTADOS"; // RESULTADOS | SELECCIONADOS | HISTORIAL
   const LS_KEY = "cfc_preseleccion_history_v1";
 
@@ -636,7 +639,15 @@ window.UI = (() => {
           ${mkBtn("DESCARTADO", `DESCARTADO (${c.descartado})`)}
         </div>
 
-        <div class="pill">Orden: <strong>Fila asc</strong></div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
+          <div class="pill">Filas visibles:
+            <button class="btn ${tableMaxRows===3 ? "active" : ""}" data-maxrows="3">3</button>
+            <button class="btn ${tableMaxRows===5 ? "active" : ""}" data-maxrows="5">5</button>
+            <button class="btn ${tableMaxRows===10 ? "active" : ""}" data-maxrows="10">10</button>
+          </div>
+
+          <div class="pill">Orden: <strong>Fila asc</strong></div>
+        </div>
       </div>
     `;
 
@@ -646,6 +657,15 @@ window.UI = (() => {
         renderTable(lastPayload.results);
         renderFilters(lastPayload.results);
         hideDetail();
+      });
+    });
+
+    // ✅ NUEVO: cambio de “filas visibles” (solo UI)
+    filters.querySelectorAll("button[data-maxrows]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        tableMaxRows = Number(btn.getAttribute("data-maxrows")) || 5;
+        renderFilters(lastPayload.results);
+        applyResultsTableScroll();
       });
     });
   }
@@ -750,6 +770,44 @@ window.UI = (() => {
   // Table
   // -------------------------
 
+  // ✅ NUEVO: aplicar alto/scroll al contenedor de tabla (sin tocar CSS global)
+  function applyResultsTableScroll() {
+    const wrap = document.getElementById("resultsTable");
+    if (!wrap) return;
+
+    const table = wrap.querySelector("table");
+    if (!table) return;
+
+    const thead = table.querySelector("thead");
+    const tbodyFirstRow = table.querySelector("tbody tr");
+
+    if (!tbodyFirstRow) {
+      wrap.style.maxHeight = "";
+      wrap.style.overflowY = "";
+      wrap.style.overflowX = "";
+      return;
+    }
+
+    const headH = thead ? thead.getBoundingClientRect().height : 0;
+    const rowH = tbodyFirstRow.getBoundingClientRect().height || 44;
+
+    const rowsCount = table.querySelectorAll("tbody tr").length;
+
+    if (rowsCount <= tableMaxRows) {
+      wrap.style.maxHeight = "";
+      wrap.style.overflowY = "";
+      wrap.style.overflowX = "";
+      return;
+    }
+
+    const extra = 16;
+    const maxH = Math.ceil(headH + (rowH * tableMaxRows) + extra);
+
+    wrap.style.maxHeight = `${maxH}px`;
+    wrap.style.overflowY = "auto";
+    wrap.style.overflowX = "auto";
+  }
+
   function renderTable(results) {
     const tableWrap = document.getElementById("resultsTable");
 
@@ -758,6 +816,10 @@ window.UI = (() => {
 
     if (!filtered.length) {
       tableWrap.innerHTML = `<div class="muted">No hay filas en este filtro.</div>`;
+      // ✅ NUEVO: reset visual si no hay tabla
+      tableWrap.style.maxHeight = "";
+      tableWrap.style.overflowY = "";
+      tableWrap.style.overflowX = "";
       return;
     }
 
@@ -840,6 +902,9 @@ window.UI = (() => {
         if (item) showDetail(item);
       });
     });
+
+    // ✅ NUEVO: aplicar altura máxima + scroll
+    applyResultsTableScroll();
   }
 
   // -------------------------
