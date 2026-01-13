@@ -612,7 +612,7 @@ if (currentFilter === "APROBADO") {
     output.innerHTML = `
       <div class="row">
         <div class="pill">Total filas: <strong>${c.total}</strong></div>
-        <div class="pill">APTO: <strong style="color:var(--ok)">${c.apto}</strong></div>
+        <div class="pill">APROBADO: <strong style="color:var(--ok)">${c.aprobado}</strong></div>
         <div class="pill">REVISAR: <strong style="color:var(--rev)">${c.revisar}</strong></div>
         <div class="pill">DESCARTADO: <strong style="color:var(--bad)">${c.descartado}</strong></div>
         <div class="pill">Versión reglas: <strong>${escapeHtml(version || "—")}</strong></div>
@@ -639,7 +639,7 @@ if (currentFilter === "APROBADO") {
       <div class="row">
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           ${mkBtn("ALL", `Todos (${c.total})`)}
-          ${mkBtn("APTO", `APTO (${c.apto})`)}
+          ${mkBtn("APROBADO", `APROBADO (${c.aprobado})`)}
           ${mkBtn("REVISAR", `REVISAR (${c.revisar})`)}
           ${mkBtn("DESCARTADO", `DESCARTADO (${c.descartado})`)}
         </div>
