@@ -762,29 +762,71 @@ if (currentFilter === "APROBADO") {
   // Summary + Filters
   // -------------------------
 
-  function renderSummary(results, version, meta = {}) {
-    const c = counts(results);
-    const output = document.getElementById("output");
+  // ---- % (2 decimales, estilo “40,00%”)
+  const pct = (n, total) => {
+    const v = total > 0 ? (n / total) * 100 : 0;
+    return v.toFixed(2).replace(".", ",") + "%";
+  };
 
-    const fileLabel = meta.fileName ? escapeHtml(meta.fileName) : "—";
-    const runAt = meta.runAt ? escapeHtml(meta.runAt) : "—";
+  const total = c.total;
 
-    output.innerHTML = `
-      <div class="row">
-        <div class="pill">Total filas: <strong>${c.total}</strong></div>
-        <div class="pill">APROBADO: <strong style="color:var(--ok)">${c.aprobado}</strong></div>
-        <div class="pill">REVISAR: <strong style="color:var(--rev)">${c.revisar}</strong></div>
-        <div class="pill">DESCARTADO: <strong style="color:var(--bad)">${c.descartado}</strong></div>
-        <div class="pill">Versión reglas: <strong>${escapeHtml(version || "—")}</strong></div>
+  output.innerHTML = `
+    <div class="row">
+      <div class="pill">Total filas: <strong>${c.total}</strong></div>
+      <div class="pill">APROBADO: <strong style="color:var(--ok)">${c.aprobado}</strong></div>
+      <div class="pill">REVISAR: <strong style="color:var(--rev)">${c.revisar}</strong></div>
+      <div class="pill">DESCARTADO: <strong style="color:var(--bad)">${c.descartado}</strong></div>
+      <div class="pill">Versión reglas: <strong>${escapeHtml(version || "—")}</strong></div>
+    </div>
+
+    <!-- ✅ 6 - CUADRO GENERAL (Resumen del archivo cargado) -->
+    <div class="miniCard" style="margin-top:12px;">
+      <div class="sectionTitle">RESUMEN GENERAL — DEL ARCHIVO CARGADO</div>
+
+      <div style="overflow:auto; margin-top:10px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="min-width:260px;">DETALLES</th>
+              <th style="width:140px;">CANTIDAD</th>
+              <th style="width:160px;">PORCENTAJE</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>TOTAL DE LÍNEAS</b></td>
+              <td><b>${total}</b></td>
+              <td><b>100%</b></td>
+            </tr>
+
+            <tr>
+              <td><b>APROBADO</b></td>
+              <td><b>${c.aprobado}</b></td>
+              <td><b>${pct(c.aprobado, total)}</b></td>
+            </tr>
+
+            <tr>
+              <td><b>REVISAR</b></td>
+              <td><b>${c.revisar}</b></td>
+              <td><b>${pct(c.revisar, total)}</b></td>
+            </tr>
+
+            <tr>
+              <td><b>DESCARTADO</b></td>
+              <td><b>${c.descartado}</b></td>
+              <td><b>${pct(c.descartado, total)}</b></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+    </div>
 
-      <div class="row" style="margin-top:10px;">
-        <div class="pill">Archivo: <strong>${fileLabel}</strong></div>
-        <div class="pill">Ejecutado: <strong>${runAt}</strong></div>
-        <div class="hint">Click en una fila para ver el detalle completo (incluye correctas/incorrectas).</div>
-      </div>
-    `;
-  }
+    <div class="row" style="margin-top:10px;">
+      <div class="pill">Archivo: <strong>${fileLabel}</strong></div>
+      <div class="pill">Ejecutado: <strong>${runAt}</strong></div>
+      <div class="hint">Click en una fila para ver el detalle completo (incluye correctas/incorrecttas).</div>
+    </div>
+  `;
 
   function renderFilters(results) {
     const c = counts(results);
