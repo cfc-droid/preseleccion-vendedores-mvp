@@ -3,10 +3,15 @@
 // - Renderiza 3 partes del detalle estilo mock
 // - Parte 2/3 (13 cerradas): usa rules/rules_v1.json
 // - Parte 1/3 (12 abiertas): COMPLETA 3 columnas automáticas
-//   * SEÑALES DETECTADAS (VÁLIDA RTA)
+//   * SEÑALES DETECTECTADAS (VÁLIDA RTA)
 //   * REGLAS ÉTICAS AFECTADAS (si aplica)
 //   * OPINIÓN IA (NO decide)
 //   SOLO si hay respuesta del vendedor. Si no hay respuesta => vacío.
+//
+// ✅ FIX (TU BUG):
+// - Sincroniza Parte 1/3 humano con la key que lee ui.js:
+//   localStorage["cfc_preseleccion_p13_v1"][rowKey] = { total_pct, estado_def }
+// - Dispara evento "psv:p13updated" para que ui.js re-renderice la tabla.
 // =====================================================
 
 (() => {
@@ -18,6 +23,9 @@
 
   // LocalStorage (Parte 1/3 editable)
   const LS_PREFIX_P13 = "p13_edit_v2";
+
+  // ✅ UI store (lo que ui.js LEE)
+  const UI_P13_KEY = "cfc_preseleccion_p13_v1";
 
   // -------------------------
   // Helpers
@@ -90,6 +98,29 @@
 
   function lsKeyP13(rowKey, qid, field) {
     return `${LS_PREFIX_P13}__${rowKey}__${qid}__${field}`;
+  }
+
+  // ✅ helpers UI store
+  function loadUIP13Store() {
+    try {
+      const raw = localStorage.getItem(UI_P13_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === "object") ? obj : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveUIP13Store(obj) {
+    try {
+      localStorage.setItem(UI_P13_KEY, JSON.stringify(obj || {}));
+    } catch (_) {}
+  }
+
+  function dispatchP13Updated() {
+    try {
+      window.dispatchEvent(new Event("psv:p13updated"));
+    } catch (_) {}
   }
 
   // -------------------------
@@ -436,7 +467,6 @@
 
     if (SPAM_RE.test(a)) ethics.push("ÉTICA: riesgo spam / sin permiso");
 
-    // --------
     // Q1
     if (qid === "Q1") {
       const mustPhrase = normalizeText("Entiendo que este modelo NO es un empleo y cobro solo por resultados");
@@ -458,7 +488,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q9
     if (qid === "Q9") {
       const mailForm = String(rowRaw?.["Dirección de correo electrónico"] ?? "").trim().toLowerCase();
@@ -480,7 +509,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q13
     if (qid === "Q13") {
       const invalid = containsAny(a, ["de todo", "varias cosas", "mucho", "un poco de todo", "de todo un poco"]);
@@ -488,10 +516,7 @@
       if (!invalid && !tooShort) {
         signals.push("✔ Respuesta VÁLIDA");
         signals.push("Menciona productos concretos");
-        if (promise) {
-          // si prometió ganancias acá, ética manda
-          return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
-        }
+        if (promise) return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.join(" | "), opinion: "NO VÁLIDA" };
         return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
       }
       signals.push("❌ Respuesta INCORRECTA");
@@ -500,7 +525,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q14
     if (qid === "Q14") {
       const invalid = containsAny(a, ["por redes", "marketing", "internet", "redes"]) && a.length < 30;
@@ -516,7 +540,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q15
     if (qid === "Q15") {
       const tooShort = a.length < 20;
@@ -532,7 +555,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q18
     if (qid === "Q18") {
       const nLines = countLinesNonEmpty(a);
@@ -550,7 +572,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q21
     if (qid === "Q21") {
       const mentionsNoSalary = /(no hay sueldo|sin sueldo|no sueldo|no existe sueldo)/i.test(a);
@@ -576,7 +597,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q22
     if (qid === "Q22") {
       const hasNumbers = /\d/.test(a);
@@ -588,7 +608,6 @@
         return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "VÁLIDA" };
       }
 
-      // si hay promesa/garantía/números -> ética fuerte
       if (promise || hasNumbers || /(asegur|garant|fijo)/i.test(a)) {
         signals.push("❌ Respuesta INCORRECTA");
         signals.push("Promete o sugiere resultados/cifras");
@@ -601,7 +620,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q23
     if (qid === "Q23") {
       const ok = containsAny(a, ["no promesas", "no prometer", "no dinero facil", "no garantias", "no garantía", "no retorno", "no resultados garantizados", "sin promesas"]);
@@ -625,7 +643,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q27
     if (qid === "Q27") {
       const tooShort = a.length < 40;
@@ -650,7 +667,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q30
     if (qid === "Q30") {
       const hasVerb = aux ? hasActionVerb(a, aux.ACTION_VERBS) : false;
@@ -667,7 +683,6 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // --------
     // Q31
     if (qid === "Q31") {
       const tooShort = a.length < 20;
@@ -686,36 +701,13 @@
       return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
     }
 
-    // fallback (no debería pasar)
     signals.push("✔ Respuesta con contenido");
     return { hasAnswer: true, senales: signals.join(" | "), eticas: ethics.length ? ethics.join(" | ") : "—", opinion: "REVISAR" };
   }
 
   // -------------------------
-  // RESUMEN PARTE 1/3 (tabla arriba) — estilo Imagen 1
-  // Cambia en tiempo real (al cambiar de fila/detalle, el patch re-renderiza)
+  // RESUMEN PARTE 1/3 (live)
   // -------------------------
-
-  function computeParte13Stats(rowRaw, aux) {
-    const total = Q_ABIERTAS_ALTA.length; // (fijo por definición de Parte 1/3)
-    let validas = 0;
-
-    for (const qid of Q_ABIERTAS_ALTA) {
-      const header = QID_TO_HEADER[qid];
-      const ansRaw = rowRaw?.[header];
-      const a = analyzeOpenAnswerByQuestion(qid, ansRaw, rowRaw, aux);
-      if (a.hasAnswer && a.opinion === "VÁLIDA") validas++;
-    }
-
-    const incorrectas = total - validas;
-
-    const pctValid = total ? Math.round((validas / total) * 100) : 0;
-    const pctInc = total ? Math.round((incorrectas / total) * 100) : 0;
-
-    const estadoDef = (pctValid >= 70) ? "APROBADO" : "NO VALIDO";
-
-    return { total, validas, incorrectas, pctValid, pctInc, estadoDef };
-  }
 
   function computeParte13StatsFromLS(rowKey) {
     const total = Q_ABIERTAS_ALTA.length; // 12
@@ -735,6 +727,39 @@
     const estadoDef = (pctValid >= 70) ? "APROBADO" : "NO VALIDO";
 
     return { total, validas, incorrectas, pctValid, pctInc, estadoDef };
+  }
+
+  // ✅ exacto a 2 decimales para la tabla general (ui.js)
+  function computeParte13TotalPctExactFromLS(rowKey) {
+    const total = Q_ABIERTAS_ALTA.length; // 12
+    const pctOkTxt = pctFixed(1, 12); // "8,33%"
+
+    let validas = 0;
+    for (const qid of Q_ABIERTAS_ALTA) {
+      const v = tryGetLS(lsKeyP13(rowKey, qid, "pct")) ?? "0";
+      if (String(v) === pctOkTxt) validas++;
+    }
+
+    const unit = 100 / total; // 8.3333...
+    const totalPct = Math.round((validas * unit) * 100) / 100; // 2 decimales
+    const estadoDef = (totalPct >= 70) ? "APROBADO" : "NO VALIDO";
+
+    return { totalPct, estadoDef, validas };
+  }
+
+  // ✅ sincroniza lo que ve ui.js (tabla general)
+  function syncUIP13StoreForRow(rowKey) {
+    const { totalPct, estadoDef } = computeParte13TotalPctExactFromLS(rowKey);
+
+    const store = loadUIP13Store();
+    store[rowKey] = {
+      total_pct: totalPct,          // ui.js espera número tipo 8.33 (no string)
+      estado_def: estadoDef,
+      updated_at: Date.now()
+    };
+    saveUIP13Store(store);
+
+    dispatchP13Updated();
   }
 
   function updateParte13SummaryLive(root, rowKey) {
@@ -759,9 +784,6 @@
 
   // -------------------------
   // Render Parte 1/3 (ABIERTAS ALTA)
-  // - AGREGA resumen arriba (Imagen 1)
-  // - 3 columnas automáticas por regla de pregunta
-  // - 2 columnas editables (observación + porcentaje 0/8,33)
   // -------------------------
 
   async function renderParte13(rowRaw, rowKey) {
@@ -905,6 +927,7 @@
 
       const handler = () => {
         const v = (el.tagName === "SELECT") ? String(el.value ?? "") : String(el.value ?? "");
+
         // pct solo 0 o 8,33%
         if (field === "pct") {
           const allowedA = "0";
@@ -915,10 +938,14 @@
             return;
           }
         }
+
         trySetLS(k, v);
 
         if (field === "pct") {
           updateParte13SummaryLive(root, rowKey);
+
+          // ✅ FIX: sincroniza con UI + dispara evento
+          syncUIP13StoreForRow(rowKey);
         }
       };
 
@@ -932,7 +959,7 @@
   }
 
   // -------------------------
-  // Render Parte 2/3 (CERRADAS) — igual que antes
+  // Render Parte 2/3 (CERRADAS)
   // -------------------------
 
   async function renderParte23(rowRaw) {
@@ -950,7 +977,6 @@
         ? evalClosedOkByRules(RULES, header, respRaw)
         : { hasAnswer: !!respRaw.trim(), isOk: false, whyCore: "no se cargaron reglas" };
 
-      // Puntaje SOLO si hay respuesta
       const puntaje = ev.hasAnswer ? (ev.isOk ? pct : "0") : "";
       const just = ev.hasAnswer ? closedJustificationStrict(respRaw, ev.isOk, ev.whyCore) : "";
 
@@ -1108,9 +1134,11 @@
     const rowKey = buildRowKey(rowRaw);
     const prevKey = panel.getAttribute(PATCH_KEY_ATTR);
     const existingWrap = panel.querySelector(`#${WRAP_ID}`);
+
     if (prevKey === rowKey && existingWrap) {
-      // Igual key, pero aseguro bind de editores (por si el DOM se re-creó)
       bindParte13Editors(existingWrap);
+      // ✅ asegura sync al volver a abrir el mismo detalle
+      syncUIP13StoreForRow(rowKey);
       return;
     }
 
@@ -1138,6 +1166,9 @@
 
     // Bind editores Parte 1/3
     bindParte13Editors(wrap);
+
+    // ✅ FIX: al renderizar, sincronizamos store para que la tabla general muestre lo correcto
+    syncUIP13StoreForRow(rowKey);
   }
 
   // -------------------------
