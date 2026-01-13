@@ -1,114 +1,100 @@
 // ======================================================
-// PATCH: Sticky Title/Header (sin tocar ui.js)
-// Objetivo: fijar el "título del registro" arriba al scrollear.
+// PATCH: Sticky THEAD (encabezado de tabla Resultados)
+// Objetivo: que quede fijo SOLO el header:
+// "Fila | Nombre | Email | Total | Estado | ..."
+// SIN mover nada para abajo y SIN tocar ui.js.
 //
-// - No depende de clases específicas: busca el H1 principal.
-// - Aplica estilos INLINE (no modifica CSS global).
-// - Si el header ya es sticky/fixed, no hace nada.
-// - Crea un "espaciador" para que el contenido no salte.
+// - Busca la tabla dentro de #resultsTable
+// - Aplica position:sticky a TH del THEAD
+// - No crea espaciadores
+// - Reintenta si la tabla se re-renderiza
 // ======================================================
 
 (function () {
-  function isAlreadyStickyOrFixed(el) {
+  const WRAP_ID = "resultsTable";
+  const STICKY_Z = "50";
+
+  function isStickyApplied(table) {
     try {
-      const cs = getComputedStyle(el);
-      return cs.position === "sticky" || cs.position === "fixed";
+      const th = table.querySelector("thead th");
+      if (!th) return false;
+      const cs = getComputedStyle(th);
+      return cs.position === "sticky";
     } catch (_) {
       return false;
     }
   }
 
-  function findMainTitleH1() {
-    // 1) Preferimos el primer H1 visible (título grande)
-    const h1s = Array.from(document.querySelectorAll("h1"));
-    for (const h of h1s) {
-      const txt = (h.textContent || "").trim();
-      if (!txt) continue;
-      const r = h.getBoundingClientRect();
-      // visible en layout
-      if (r.height > 10 && r.width > 50) return h;
+  function applyStickyThead() {
+    const wrap = document.getElementById(WRAP_ID);
+    if (!wrap) return false;
+
+    const table = wrap.querySelector("table");
+    if (!table) return false;
+
+    const thead = table.querySelector("thead");
+    if (!thead) return false;
+
+    // Importante: sticky del thead funciona mejor aplicándolo a cada TH
+    const ths = Array.from(thead.querySelectorAll("th"));
+    if (!ths.length) return false;
+
+    // Si ya está aplicado, no repetimos
+    if (isStickyApplied(table)) return true;
+
+    // Aseguramos que el contenedor permita scroll horizontal/vertical
+    // (sin cambiar el layout, solo asegura comportamiento sticky)
+    // No forzamos heights acá.
+    wrap.style.overflowX = wrap.style.overflowX || "auto";
+
+    // Aplicamos sticky a cada TH
+    for (const th of ths) {
+      th.style.position = "sticky";
+      th.style.top = "0px";
+      th.style.zIndex = STICKY_Z;
+
+      // Fondo para que no se transparente al scrollear
+      // (sin tocar CSS global)
+      th.style.background = "rgba(10, 12, 18, 0.96)";
+
+      // Línea inferior sutil
+      th.style.borderBottom = th.style.borderBottom || "1px solid rgba(255,255,255,0.06)";
     }
-    return null;
+
+    return true;
   }
 
-  function pickHeaderContainerFromH1(h1) {
-    // Elegimos un contenedor razonable para "fijar" (no el H1 solo).
-    // Subimos hasta encontrar un bloque que contenga el título + subtítulo/botones.
-    // Limitamos la subida para no agarrar el BODY.
-    let el = h1;
-    for (let i = 0; i < 6; i++) {
-      const p = el.parentElement;
-      if (!p) break;
+  // Reintentos suaves porque UI re-renderiza tabla al filtrar / cambiar tabs
+  let tries = 0;
+  function boot() {
+    const ok = applyStickyThead();
+    if (ok) return;
 
-      // Evitar subir a body/html
-      const tag = (p.tagName || "").toLowerCase();
-      if (tag === "body" || tag === "html") break;
-
-      // Heurística: si el padre tiene más contenido útil (inputs/botones/subtítulo),
-      // lo tomamos como candidato a sticky.
-      const hasControls =
-        p.querySelector("input, button, select, textarea, a") !== null;
-      const hasText = (p.textContent || "").trim().length > (h1.textContent || "").trim().length + 10;
-
-      // Si tiene controles o bastante texto, es buen "header" a fijar
-      if (hasControls || hasText) el = p;
-      else break;
+    tries++;
+    if (tries < 30) {
+      setTimeout(boot, 150);
     }
-    return el;
   }
 
-  function applyStickyHeader() {
-    const h1 = findMainTitleH1();
-    if (!h1) return;
+  // Observa cambios dentro de #resultsTable para re-aplicar cuando se re-renderiza
+  function observeRerenders() {
+    const wrap = document.getElementById(WRAP_ID);
+    if (!wrap) return;
 
-    const header = pickHeaderContainerFromH1(h1);
-    if (!header) return;
-
-    // Si ya es sticky/fixed, no lo tocamos
-    if (isAlreadyStickyOrFixed(header)) return;
-
-    // Creamos espaciador para evitar "salto" al cambiar a sticky
-    const spacer = document.createElement("div");
-    spacer.setAttribute("data-sticky-spacer", "1");
-
-    // Insertamos el espaciador justo antes del header
-    header.parentNode.insertBefore(spacer, header);
-
-    // Medimos alto real del header
-    const rect = header.getBoundingClientRect();
-    const h = Math.ceil(rect.height || 0);
-
-    spacer.style.height = h ? `${h}px` : "0px";
-
-    // Aplicamos sticky inline
-    header.style.position = "sticky";
-    header.style.top = "0px";
-    header.style.zIndex = "999"; // arriba de cards/tablas
-    header.style.backdropFilter = "blur(6px)";
-    header.style.webkitBackdropFilter = "blur(6px)";
-
-    // Fondo semi-transparente para que no se “pierda” sobre el contenido
-    // (sin tocar variables CSS)
-    header.style.background = "rgba(10, 12, 18, 0.78)";
-
-    // Separación sutil abajo
-    header.style.borderBottom = "1px solid rgba(255,255,255,0.06)";
-
-    // Que no se achique si hay flex layouts
-    header.style.flexShrink = "0";
-
-    // Si el header cambia de tamaño por responsive, recalculamos el spacer
-    const ro = new ResizeObserver(() => {
-      const r2 = header.getBoundingClientRect();
-      const nh = Math.ceil(r2.height || 0);
-      spacer.style.height = nh ? `${nh}px` : "0px";
+    const mo = new MutationObserver(() => {
+      applyStickyThead();
     });
-    ro.observe(header);
+
+    mo.observe(wrap, { childList: true, subtree: true });
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", applyStickyHeader);
+    document.addEventListener("DOMContentLoaded", () => {
+      boot();
+      observeRerenders();
+    });
   } else {
-    applyStickyHeader();
+    boot();
+    observeRerenders();
   }
 })();
