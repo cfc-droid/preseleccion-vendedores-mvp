@@ -954,26 +954,23 @@ if (currentFilter === "APROBADO") {
       });
     });
 
-    // ✅ NUEVO — Guardar “ENVIÉ CORREO (SI/NO)” (manual)
-    tableWrap.querySelectorAll('input[data-sentmail]').forEach(chk => {
-      chk.addEventListener("click", (e) => {
-        // evita que el click en el checkbox abra el detalle (click en <tr>)
-        e.preventDefault();
-        e.stopPropagation();
+// ✅ NUEVO — “ENVIÉ CORREO (SI/NO)” como texto clickeable
+tableWrap.querySelectorAll('button[data-sentmail]').forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-        // toggle manual (porque prevenimos default)
-        chk.checked = !chk.checked;
+    const fila = Number(btn.getAttribute("data-sentmail"));
+    const item = lastPayload.results.find(x => x.fila === fila);
+    if (!item) return;
 
-        const fila = Number(chk.getAttribute("data-sentmail"));
-        const item = lastPayload.results.find(x => x.fila === fila);
-        if (item) setSentFor(item, chk.checked);
-      });
+    const newVal = !getSentFor(item); // toggle
+    setSentFor(item, newVal);
 
-      chk.addEventListener("change", (e) => {
-        // doble seguro: si el navegador dispara change, no abrir detalle
-        e.stopPropagation();
-      });
-    });
+    // actualizar UI sin re-render completo
+    btn.textContent = newVal ? "SI" : "NO";
+  });
+});
     
     
     // ✅ NUEVO: aplicar altura máxima + scroll
