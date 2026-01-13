@@ -770,9 +770,163 @@ window.UI = (() => {
   // Table
   // -------------------------
 
+  // ✅ NUEVO: Header flotante FIXED para la tabla de Resultados
+  // - Clona el THEAD y lo muestra como barra fija cuando el header real “se va” al scrollear.
+  // - Se alinea con la tabla (ancho + columnas) y respeta scroll horizontal del wrap.
+  let _floatWrap = null;
+  let _floatTable = null;
+  let _floatBar = null;
+  let _raf = 0;
+
+  function ensureFloatingBar() {
+    if (_floatBar) return _floatBar;
+
+    const bar = document.createElement("div");
+    bar.id = "cfcFloatingThead";
+    bar.style.position = "fixed";
+    bar.style.top = "0px";
+    bar.style.left = "0px";
+    bar.style.zIndex = "9999";
+    bar.style.display = "none";
+    bar.style.pointerEvents = "none"; // no interfiere clics
+    bar.style.background = "rgba(10, 12, 18, 0.96)";
+    bar.style.backdropFilter = "blur(6px)";
+    bar.style.webkitBackdropFilter = "blur(6px)";
+    bar.style.borderBottom = "1px solid rgba(255,255,255,0.08)";
+
+    document.body.appendChild(bar);
+    _floatBar = bar;
+    return bar;
+  }
+
+  function buildFloatingHeaderFrom(table) {
+    const thead = table.querySelector("thead");
+    if (!thead) return false;
+
+    const bar = ensureFloatingBar();
+
+    // Clonamos solo thead en una tabla nueva (para heredar estilos .table)
+    const t = document.createElement("table");
+    t.className = table.className || "table";
+    t.style.margin = "0";
+    t.style.borderCollapse = "separate";
+    t.style.borderSpacing = "0";
+
+    const theadClone = thead.cloneNode(true);
+    t.appendChild(theadClone);
+
+    bar.innerHTML = "";
+    bar.appendChild(t);
+
+    return true;
+  }
+
+  function syncFloatingHeaderSizes() {
+    if (!_floatWrap || !_floatTable || !_floatBar) return;
+
+    const realTheadRow = _floatTable.querySelector("thead tr");
+    const realThs = realTheadRow ? Array.from(realTheadRow.children) : [];
+    const cloneThs = _floatBar.querySelectorAll("thead th");
+
+    if (!realThs.length || !cloneThs.length) return;
+
+    // Alinear ancho/posición con el contenedor visible
+    const wrapRect = _floatWrap.getBoundingClientRect();
+    _floatBar.style.left = `${wrapRect.left}px`;
+    _floatBar.style.width = `${wrapRect.width}px`;
+
+    // Sync widths por columna
+    for (let i = 0; i < Math.min(realThs.length, cloneThs.length); i++) {
+      const w = realThs[i].getBoundingClientRect().width;
+      cloneThs[i].style.width = `${w}px`;
+      cloneThs[i].style.minWidth = `${w}px`;
+      cloneThs[i].style.maxWidth = `${w}px`;
+      cloneThs[i].style.background = "rgba(10, 12, 18, 0.96)";
+      cloneThs[i].style.backgroundClip = "padding-box";
+      cloneThs[i].style.zIndex = "9999";
+    }
+
+    // Respetar scroll horizontal del wrap (si existe)
+    const sx = _floatWrap.scrollLeft || 0;
+    const innerTable = _floatBar.querySelector("table");
+    if (innerTable) {
+      innerTable.style.transform = `translateX(${-sx}px)`;
+    }
+  }
+
+  function updateFloatingHeaderVisibility() {
+    if (!_floatWrap || !_floatTable || !_floatBar) return;
+
+    const thead = _floatTable.querySelector("thead");
+    const tbody = _floatTable.querySelector("tbody");
+    if (!thead || !tbody) {
+      _floatBar.style.display = "none";
+      return;
+    }
+
+    const wrapRect = _floatWrap.getBoundingClientRect();
+    const theadRect = thead.getBoundingClientRect();
+    const tableRect = _floatTable.getBoundingClientRect();
+
+    // Mostrar si:
+    // - El wrap está visible en viewport
+    // - El header real ya se fue por arriba (theadRect.top < 0)
+    // - La tabla aún no terminó (tableRect.bottom > 0)
+    const wrapVisible = wrapRect.bottom > 0 && wrapRect.top < window.innerHeight;
+    const headerGoneUp = theadRect.top < 0;
+    const tableNotFinished = tableRect.bottom > 0;
+
+    if (wrapVisible && headerGoneUp && tableNotFinished) {
+      _floatBar.style.display = "block";
+      syncFloatingHeaderSizes();
+    } else {
+      _floatBar.style.display = "none";
+    }
+  }
+
+  function scheduleFloatingUpdate() {
+    if (_raf) cancelAnimationFrame(_raf);
+    _raf = requestAnimationFrame(() => {
+      _raf = 0;
+      updateFloatingHeaderVisibility();
+    });
+  }
+
+  function attachFloatingHeaderToResultsTable() {
+    const wrap = document.getElementById("resultsTable");
+    if (!wrap) return;
+
+    const table = wrap.querySelector("table");
+    if (!table) return;
+
+    _floatWrap = wrap;
+    _floatTable = table;
+
+    // Construir barra con thead clonado
+    const ok = buildFloatingHeaderFrom(table);
+    if (!ok) return;
+
+    // listeners (una sola vez)
+    if (!wrap.__cfcFloatBound) {
+      wrap.__cfcFloatBound = true;
+      window.addEventListener("scroll", scheduleFloatingUpdate, { passive: true });
+      window.addEventListener("resize", scheduleFloatingUpdate);
+      wrap.addEventListener("scroll", scheduleFloatingUpdate, { passive: true });
+
+      // si el DOM cambia (re-render), rearmamos en el próximo frame
+      const mo = new MutationObserver(() => scheduleFloatingUpdate());
+      mo.observe(wrap, { childList: true, subtree: true });
+      wrap.__cfcFloatMO = mo;
+    }
+
+    scheduleFloatingUpdate();
+  }
+
+  
   // ✅ NUEVO: aplicar alto/scroll al contenedor de tabla (sin tocar CSS global)
   // ✅ FIX: mantener header (thead) fijo dentro del scroll (sticky) para que no “se pierda” al bajar.
   function applyResultsTableScroll() {
+    attachFloatingHeaderToResultsTable();
     const wrap = document.getElementById("resultsTable");
     if (!wrap) return;
 
@@ -787,18 +941,9 @@ window.UI = (() => {
       wrap.style.overflowY = "";
       wrap.style.overflowX = "";
       return;
-    }
 
-    // ✅ FIX: sticky header dentro del contenedor con overflow
-    if (thead) {
-      const bg = (window.getComputedStyle(wrap).backgroundColor || "").trim() || "rgba(0,0,0,0)";
-      thead.querySelectorAll("th").forEach(th => {
-        th.style.position = "sticky";
-        th.style.top = "0px";
-        th.style.zIndex = "3";
-        th.style.background = bg;
-        th.style.backgroundClip = "padding-box";
-      });
+          // actualizar barra flotante si ya está armada
+    scheduleFloatingUpdate();
     }
 
     const headH = thead ? thead.getBoundingClientRect().height : 0;
