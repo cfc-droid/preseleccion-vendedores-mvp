@@ -8,17 +8,14 @@
   margin-bottom: 10px;
 }
 
-/* IMPORTANTE:
-   Quitamos padding general para que la tabla fija empiece alineada
-   con la tabla real (misma distancia al borde del card).
-*/
+/* Quitamos padding general para alinear */
 #psvFixedHeaderBar {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: rgba(11,11,15,0.92);
   box-shadow: var(--shadow);
   backdrop-filter: blur(6px);
-  padding: 0; /* <-- clave para alinear */
+  padding: 0;
   overflow: hidden;
 }
 
@@ -29,7 +26,7 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 10px;      /* <-- el padding va acá */
+  padding: 10px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -40,21 +37,20 @@
   color: var(--text);
 }
 
-/* Scroll sin borde extra (el borde ya está en el bar) */
+/* Scroll sin borde extra */
 #psvFixedHeaderScroll {
   overflow-x: auto;
   overflow-y: hidden;
 }
 
-/* Usamos la misma clase .table para heredar reglas base */
+/* Tabla */
 #psvFixedHeaderTable {
   width: 100%;
   border-collapse: collapse;
 }
 
-/* Ajustes finos del header (solo th) */
 #psvFixedHeaderTable th {
-  padding: 10px 10px; /* igual que tu .table th */
+  padding: 10px 10px;
   font-size: 13px;
   color: var(--muted);
   font-weight: 700;
@@ -63,7 +59,9 @@
   background: rgba(255,255,255,0.03);
 }
 
-/* Estado oculto */
+/* Estado oculto:
+   OJO: ahora lo aplicamos SOLO al scroller, no al wrap completo.
+*/
 .psvFixedHeaderHidden {
   display: none !important;
 }
