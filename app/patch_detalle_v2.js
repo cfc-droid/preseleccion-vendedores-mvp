@@ -888,7 +888,7 @@
         </div>
 
         <div class="muted" style="margin-top:8px;">
-          APROBADO = igual o mayor a 66% | NO VALIDO = menor a 66%.
+          APROBADO = igual o mayor a 70% | NO VALIDO = menor a 70%.
         </div>
       </div>
 
