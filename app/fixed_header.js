@@ -4,6 +4,10 @@
 // - Se pega arriba del panel
 // - Toggle ocultar/mostrar (persistente por navegador)
 // - Sync scroll horizontal con contenedor real si existe overflow
+//
+// FIX CLAVE:
+// No ocultamos TODO el wrap (porque escondería el botón).
+// Ocultamos solo el bloque scroll/tabla, dejando visible la barra superior.
 
 (() => {
   const LS_KEY = "psv_fixed_header_enabled_v1";
@@ -35,8 +39,6 @@
   }
 
   function getRealHorizontalScroller(real) {
-    // Intentamos usar el contenedor donde realmente ocurre el scroll horizontal.
-    // Si #resultsTable no scrollea horizontalmente, no forzamos sync (evita bugs).
     if (!real || !real.wrap) return null;
     try {
       if (real.wrap.scrollWidth > real.wrap.clientWidth) return real.wrap;
@@ -56,7 +58,7 @@
 
     if (!wrap || !title || !btn || !scroller || !headTable) return false;
 
-    // Asegurar que el header use las mismas reglas base de la tabla real
+    // Asegurar que el header use reglas base similares
     headTable.className = "table";
     headTable.style.tableLayout = "fixed";
 
@@ -74,7 +76,6 @@
     thead.appendChild(tr);
     headTable.appendChild(thead);
 
-    // ====== Sync ancho columnas con tabla real ======
     function syncWidths() {
       const realNow = getRealTable();
       if (!realNow) return;
@@ -83,7 +84,6 @@
       const fakeThs = Array.from(headTable.querySelectorAll("th"));
       if (fakeThs.length !== realThs.length) return;
 
-      // Igualar ancho total del header al ancho real de la tabla
       try {
         const wTable = realNow.table.getBoundingClientRect().width;
         if (wTable && wTable > 0) headTable.style.width = Math.ceil(wTable) + "px";
@@ -101,21 +101,17 @@
     }
 
     // ====== Limpiar listeners previos (idempotente) ======
-    // Clonamos botón y scroller para borrar listeners acumulados si buildHeader corre varias veces.
+    // Clonamos SOLO el botón para evitar duplicar listeners.
     const btnClone = btn.cloneNode(true);
     btn.parentNode.replaceChild(btnClone, btn);
 
-    const scrollerClone = scroller.cloneNode(true);
-    scroller.parentNode.replaceChild(scrollerClone, scroller);
-
-    // Re-obtener refs tras clonado
     const btn2 = document.getElementById("psvFixedHeaderToggle");
     const scroller2 = document.getElementById("psvFixedHeaderScroll");
 
-    // ====== Toggle ======
     function applyEnabled() {
       const on = isEnabled();
-      wrap.classList.toggle("psvFixedHeaderHidden", !on);
+      // IMPORTANTE: ocultamos SOLO la parte scroll/tabla
+      scroller2.classList.toggle("psvFixedHeaderHidden", !on);
       btn2.textContent = on ? "Ocultar encabezado fijo" : "Mostrar encabezado fijo";
     }
 
@@ -124,7 +120,6 @@
       const next = !isEnabled();
       setEnabled(next);
       applyEnabled();
-      // Al mostrar, re-sincronizamos por si cambió el layout
       if (next) {
         try { requestAnimationFrame(syncWidths); } catch (_) { syncWidths(); }
       }
@@ -175,7 +170,7 @@
     if (!ensureMountPoint()) return;
 
     let tries = 0;
-    const maxTries = 80; // ~20s
+    const maxTries = 80;
 
     const tick = () => {
       tries++;
@@ -185,7 +180,6 @@
     };
     tick();
 
-    // Detectar re-render de UI
     const root = document.getElementById("viewResultados") || document.body;
     const mo = new MutationObserver(() => {
       const real = getRealTable();
@@ -195,7 +189,6 @@
       const fakeCount = fake.querySelectorAll("th").length;
       const realCount = real.ths.length;
 
-      // Si cambió cantidad de columnas o la tabla se recreó, reconstruimos
       if (fakeCount !== realCount) buildHeader();
     });
     mo.observe(root, { childList: true, subtree: true });
