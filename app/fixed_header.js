@@ -3,7 +3,7 @@
 // - Clona títulos desde el thead real
 // - Se pega arriba del panel
 // - Toggle ocultar/mostrar (persistente por navegador)
-// - Sync scroll horizontal con #resultsTable
+// - Sync scroll horizontal con contenedor real si existe overflow
 
 (() => {
   const LS_KEY = "psv_fixed_header_enabled_v1";
@@ -34,6 +34,16 @@
     return { wrap, table, ths };
   }
 
+  function getRealHorizontalScroller(real) {
+    // Intentamos usar el contenedor donde realmente ocurre el scroll horizontal.
+    // Si #resultsTable no scrollea horizontalmente, no forzamos sync (evita bugs).
+    if (!real || !real.wrap) return null;
+    try {
+      if (real.wrap.scrollWidth > real.wrap.clientWidth) return real.wrap;
+    } catch (_) {}
+    return null;
+  }
+
   function buildHeader() {
     const real = getRealTable();
     if (!real) return false;
@@ -46,7 +56,11 @@
 
     if (!wrap || !title || !btn || !scroller || !headTable) return false;
 
-    // Crear thead fijo
+    // Asegurar que el header use las mismas reglas base de la tabla real
+    headTable.className = "table";
+    headTable.style.tableLayout = "fixed";
+
+    // Re-crear thead fijo
     headTable.innerHTML = "";
     const thead = document.createElement("thead");
     const tr = document.createElement("tr");
@@ -60,7 +74,7 @@
     thead.appendChild(tr);
     headTable.appendChild(thead);
 
-    // Sync ancho columnas con tabla real
+    // ====== Sync ancho columnas con tabla real ======
     function syncWidths() {
       const realNow = getRealTable();
       if (!realNow) return;
@@ -69,63 +83,85 @@
       const fakeThs = Array.from(headTable.querySelectorAll("th"));
       if (fakeThs.length !== realThs.length) return;
 
+      // Igualar ancho total del header al ancho real de la tabla
+      try {
+        const wTable = realNow.table.getBoundingClientRect().width;
+        if (wTable && wTable > 0) headTable.style.width = Math.ceil(wTable) + "px";
+      } catch (_) {}
+
       for (let i = 0; i < realThs.length; i++) {
         const w = realThs[i].getBoundingClientRect().width;
         if (w && w > 0) {
-          fakeThs[i].style.width = Math.ceil(w) + "px";
-          fakeThs[i].style.minWidth = Math.ceil(w) + "px";
-          fakeThs[i].style.maxWidth = Math.ceil(w) + "px";
+          const px = Math.ceil(w) + "px";
+          fakeThs[i].style.width = px;
+          fakeThs[i].style.minWidth = px;
+          fakeThs[i].style.maxWidth = px;
         }
       }
     }
 
-    // Sync scroll horizontal (doble vía, sin loop)
-    let lock = false;
+    // ====== Limpiar listeners previos (idempotente) ======
+    // Clonamos botón y scroller para borrar listeners acumulados si buildHeader corre varias veces.
+    const btnClone = btn.cloneNode(true);
+    btn.parentNode.replaceChild(btnClone, btn);
 
-    function syncFromReal() {
-      if (lock) return;
-      lock = true;
-      try { scroller.scrollLeft = real.wrap.scrollLeft; } catch (_) {}
-      lock = false;
-    }
+    const scrollerClone = scroller.cloneNode(true);
+    scroller.parentNode.replaceChild(scrollerClone, scroller);
 
-    function syncFromFake() {
-      if (lock) return;
-      lock = true;
-      try { real.wrap.scrollLeft = scroller.scrollLeft; } catch (_) {}
-      lock = false;
-    }
+    // Re-obtener refs tras clonado
+    const btn2 = document.getElementById("psvFixedHeaderToggle");
+    const scroller2 = document.getElementById("psvFixedHeaderScroll");
 
-    // Limpiar listeners previos (simple: clonar nodos)
-    const scrollerNew = scroller.cloneNode(true);
-    scroller.parentNode.replaceChild(scrollerNew, scrollerNew.previousSibling); // no-op safety
-
-    // (Arriba no sirve en todos los browsers, entonces hacemos directo)
-    // Mejor: remove + rebind: (acá minimalista)
-    real.wrap.addEventListener("scroll", syncFromReal, { passive: true });
-    scroller.addEventListener("scroll", syncFromFake, { passive: true });
-
-    // Toggle
+    // ====== Toggle ======
     function applyEnabled() {
       const on = isEnabled();
       wrap.classList.toggle("psvFixedHeaderHidden", !on);
-      btn.textContent = on ? "Ocultar encabezado fijo" : "Mostrar encabezado fijo";
+      btn2.textContent = on ? "Ocultar encabezado fijo" : "Mostrar encabezado fijo";
     }
 
-    btn.addEventListener("click", (e) => {
+    btn2.addEventListener("click", (e) => {
       e.preventDefault();
       const next = !isEnabled();
       setEnabled(next);
       applyEnabled();
+      // Al mostrar, re-sincronizamos por si cambió el layout
+      if (next) {
+        try { requestAnimationFrame(syncWidths); } catch (_) { syncWidths(); }
+      }
     });
 
     applyEnabled();
-    syncWidths();
+
+    // ====== Sync scroll horizontal (solo si hay overflow real) ======
+    const realScroller = getRealHorizontalScroller(real);
+
+    if (realScroller) {
+      let lock = false;
+
+      const syncFromReal = () => {
+        if (lock) return;
+        lock = true;
+        try { scroller2.scrollLeft = realScroller.scrollLeft; } catch (_) {}
+        lock = false;
+      };
+
+      const syncFromFake = () => {
+        if (lock) return;
+        lock = true;
+        try { realScroller.scrollLeft = scroller2.scrollLeft; } catch (_) {}
+        lock = false;
+      };
+
+      realScroller.addEventListener("scroll", syncFromReal, { passive: true });
+      scroller2.addEventListener("scroll", syncFromFake, { passive: true });
+    }
+
+    // ====== Re-sync por layout ======
+    try { syncWidths(); } catch (_) {}
+    setTimeout(syncWidths, 50);
     setTimeout(syncWidths, 250);
     setTimeout(syncWidths, 800);
-    setTimeout(syncWidths, 1500);
 
-    // Re-sync si cambia layout
     try {
       const ro = new ResizeObserver(() => syncWidths());
       ro.observe(real.wrap);
@@ -136,10 +172,8 @@
   }
 
   function boot() {
-    // Solo si existe el mount point (lo ponemos en index.html)
     if (!ensureMountPoint()) return;
 
-    // Intentar construir cuando ya exista la tabla
     let tries = 0;
     const maxTries = 80; // ~20s
 
@@ -151,15 +185,20 @@
     };
     tick();
 
-    // Detectar re-render de UI (tu UI reescribe resultsTable)
+    // Detectar re-render de UI
+    const root = document.getElementById("viewResultados") || document.body;
     const mo = new MutationObserver(() => {
       const real = getRealTable();
       const fake = document.getElementById("psvFixedHeaderTable");
-      if (real && fake && fake.querySelectorAll("th").length !== real.ths.length) {
-        buildHeader();
-      }
+      if (!real || !fake) return;
+
+      const fakeCount = fake.querySelectorAll("th").length;
+      const realCount = real.ths.length;
+
+      // Si cambió cantidad de columnas o la tabla se recreó, reconstruimos
+      if (fakeCount !== realCount) buildHeader();
     });
-    mo.observe(document.getElementById("viewResultados") || document.body, { childList: true, subtree: true });
+    mo.observe(root, { childList: true, subtree: true });
   }
 
   document.addEventListener("DOMContentLoaded", boot);
