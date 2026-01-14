@@ -698,7 +698,7 @@ if (currentFilter === "APROBADO") {
     if (totalPct === "") return { totalPct: "", estadoDef: estadoDef || "" };
 
     const pctTxt = `${Math.round(totalPct * 100) / 100}`.replace(".", ",") + "%";
-    const estado = estadoDef || (totalPct >= 70 ? "APROBADO" : "NO VALIDO");
+    const estado = estadoDef || (totalPct >= 66 ? "APROBADO" : "NO VALIDO");
     return { totalPct: pctTxt, estadoDef: estado };
   }
 
